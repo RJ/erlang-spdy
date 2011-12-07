@@ -1,0 +1,12 @@
+{application, espdy,
+ [
+  {description, "Library implementing SPDY protocol"},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { espdy, []}},
+  {env, []}
+ ]}.
