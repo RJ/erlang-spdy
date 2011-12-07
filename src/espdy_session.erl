@@ -68,9 +68,13 @@ handle_cast({snd, _StreamID, Frame}, State) ->
     socket_write(Frame, State),
     {noreply, State}.
 
+%% means we are the controlling process for the socket: go go go
 handle_info(shoot, State = #state{transport=Transport, socket=Socket}) ->
     ?LOG("Shoot.",[]),
-    Transport:setopts(Socket, [{active,once}, binary, {packet,raw}]),
+    case Transport of 
+        gen_tcp -> inet:setopts(Socket, [{active,once}, binary, {packet,raw}]);
+        ssl     -> ssl:setopts(Socket, [{active,once}, binary, {packet,raw}])
+    end,
     {noreply, State};
 
 handle_info({ssl_closed, Sock}, State) ->
@@ -84,7 +88,10 @@ handle_info({ssl, Sock, Data}, State) ->
 handle_info({tcp, Socket, Data}, State = #state{socket=Socket, transport=Transport, buffer=Buffer}) ->
     ?LOG("INCDATA: ~p\n", [Data]),
     Ret = process_buffer(State#state{buffer = <<Buffer/binary, Data/binary>>}),
-    Transport:setopts(Socket, [{active,once}]),
+    case Transport of 
+        gen_tcp -> inet:setopts(Socket, [{active,once}]);
+        ssl     -> ssl:setopts(Socket, [{active,once}])
+    end,
     Ret.
 
 terminate(_Reason, State = #state{transport=Transport, socket=Socket, z_headers=Z}) ->
