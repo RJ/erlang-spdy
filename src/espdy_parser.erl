@@ -2,8 +2,6 @@
 %% Parses frames from wire format to #spdy_* records (parse_frame)
 %% and rebuilds wire format from #spdy_* records (build_frame)
 %%
-%% Doesn't do any inflating of name/val blocks.
-%%
 -module(espdy_parser).
 -include("include/espdy.hrl").
 -compile(export_all).
@@ -22,7 +20,7 @@ parse_frame(<<  0:1, %% control bit clear = data
                 Length:24/big-unsigned-integer,
                 Data:Length/binary-unit:8,
                 Rest/binary
-             >>) ->
+             >>, _Z) ->
     {#spdy_data{streamid=StreamID,
                 flags=Flags,
                 data=Data}, Rest};
@@ -42,12 +40,12 @@ parse_frame(<<  1:1, %% control bit
                 Length:24/big-unsigned-integer,
                 Data:Length/binary-unit:8,
                 Rest/binary
-            >>) ->
-    {parse_control_frame(Version, Type, Flags, Length, Data), Rest};
+            >>, Z) ->
+    {parse_control_frame(Version, Type, Flags, Length, Data, Z), Rest};
 
 
 %% No full frame found:
-parse_frame(_Buffer) ->
+parse_frame(_Buffer, _Z) ->
     undefined. 
 
 parse_control_frame(V=2, ?SYN_STREAM, Flags, _Length, 
@@ -55,63 +53,66 @@ parse_control_frame(V=2, ?SYN_STREAM, Flags, _Length,
                        _:1, AssocStreamID:31/big-unsigned-integer,
                        Priority:2/big-unsigned-integer, %% size is 3 in v3
                        _Unused:14/binary-unit:1, %% size is 12 in v3
-                       NVPairsData/binary >>) ->
+                       NVPairsData/binary >>, Z) ->
+    Headers = parse_name_val_pairs(NVPairsData, Z),
     #spdy_syn_stream{version = V, 
                      flags=Flags,
                      streamid=StreamID,
                      associd=AssocStreamID,
                      priority=Priority,
-                     nvdata=NVPairsData};
+                     headers=Headers};
 
 parse_control_frame(V=2, ?SYN_REPLY, Flags, _Length,
                     << _:1, StreamID:31/big-unsigned-integer,
-                       NVPairsData/binary >> ) ->
+                       NVPairsData/binary >>, Z) ->
+    Headers = parse_name_val_pairs(NVPairsData, Z),
     #spdy_syn_reply{version=V,
                     flags=Flags,
                     streamid=StreamID,
-                    nvdata=NVPairsData};
+                    headers=Headers}; 
 
 parse_control_frame(V=2, ?RST_STREAM, Flags, _Length,
                     <<  _:1, StreamID:31/big-unsigned-integer,
-                       StatusCode:32/big-unsigned-integer >>) ->
+                       StatusCode:32/big-unsigned-integer >>, _Z) ->
     #spdy_rst_stream{version=V,
                      flags=Flags,
                      streamid=StreamID,
                      statuscode=StatusCode};
 
-parse_control_frame(V=2, ?SETTINGS, Flags, _Length, Data) ->
+parse_control_frame(V=2, ?SETTINGS, Flags, _Length, Data, _Z) ->
     #spdy_settings{ version=V,
                     flags=Flags,
                     settings=parse_settings(Data)};
 
-parse_control_frame(V=2, ?NOOP, _Flags, 0, _Data) ->
+parse_control_frame(V=2, ?NOOP, _Flags, 0, _Data, _Z) ->
     #spdy_noop{ version=V };
 
-parse_control_frame(V=2, ?PING, _Flags, 4, << PingID:32/big-unsigned-integer >>) ->
+parse_control_frame(V=2, ?PING, _Flags, 4, << PingID:32/big-unsigned-integer >>, _Z) ->
     #spdy_ping{ version=V, id=PingID };
 
 %% in v3: , StatusCode:32/big-unsigned-integer >>
 parse_control_frame(V=2, ?GOAWAY, _Flags, 4,  
-                    << _:1, LastGoodStreamID:31/big-unsigned-integer >>) ->
+                    << _:1, LastGoodStreamID:31/big-unsigned-integer >>, _Z) ->
     #spdy_goaway{version=V, lastgoodid=LastGoodStreamID};
 
 parse_control_frame(V=2, ?HEADERS, Flags, _Length,
                      << _:1, StreamID:31/big-unsigned-integer,
                         _Unused:16/binary, %% not in v3?
-                        NVPairsData/binary >>) ->
+                        NVPairsData/binary >>, Z) ->
+    Headers = parse_name_val_pairs(NVPairsData, Z),
     #spdy_headers{version=V,
                   flags=Flags,
                   streamid=StreamID,
-                  nvdata=NVPairsData};
+                  headers=Headers};
 
-parse_control_frame(_, _, _, _, _) ->
+parse_control_frame(_V, _Type, _Flags, _Len, _Data, _Z) ->
     undefined.
 
 %% Marshal frame back into binary for transmission
 
 build_frame(#spdy_data{streamid=StreamID,
                        flags=Flags, 
-                       data=Data}) ->
+                       data=Data}, _Z) ->
     Length = size(Data),
     << 0:1, StreamID:31/big-unsigned-integer,
        Flags:8/big-unsigned-integer, 
@@ -124,7 +125,8 @@ build_frame(#spdy_syn_stream{version = Version,
                              streamid=StreamID,
                              associd=AssocID,
                              priority=Priority,
-                             nvdata=NVData}) ->
+                             headers=Headers}, Z) ->
+    NVData = encode_name_value_pairs(Headers, Z),
     bcf(Version, ?SYN_STREAM, Flags, << 0:1, StreamID:31/big-unsigned-integer,
                                         0:1, AssocID:31/big-unsigned-integer,
                                         Priority:2/big-unsigned-integer, %% size is 3 in v3
@@ -134,7 +136,8 @@ build_frame(#spdy_syn_stream{version = Version,
 build_frame(#spdy_syn_reply{ version = Version, 
                              flags=Flags,
                              streamid=StreamID,
-                             nvdata=NVData}) ->
+                             headers=Headers}, Z) ->
+    NVData = encode_name_value_pairs(Headers, Z),
     bcf(Version, ?SYN_REPLY, Flags, << 0:1, StreamID:31/big-unsigned-integer,
                                        0:16/unit:1, %% UNUSED
                                        NVData/binary >>);
@@ -142,16 +145,16 @@ build_frame(#spdy_syn_reply{ version = Version,
 build_frame(#spdy_rst_stream{version = Version, 
                              flags=Flags,
                              streamid=StreamID,
-                             statuscode=StatusCode}) ->
+                             statuscode=StatusCode}, _Z) ->
     bcf(Version, ?RST_STREAM, Flags, << 0:1, StreamID:31/big-unsigned-integer,
                                         StatusCode:32/big-unsigned-integer >>);
 
 build_frame(#spdy_ping{      version = Version, 
-                             id=PingID}) ->
+                             id=PingID}, _Z) ->
     bcf(Version, ?PING, 0, << PingID:32/big-unsigned-integer >>);
 
 build_frame(#spdy_goaway{    version = Version,
-                             lastgoodid=LGI}) ->
+                             lastgoodid=LGI}, _Z) ->
     bcf(Version, ?GOAWAY, 0, << 0:1, LGI:31/big-unsigned-integer >>).
 
 %% TODO not implemented build_frame for all types yet
@@ -171,8 +174,9 @@ bcf(Version, Type, Flags, Data) ->
 
 %% 2.6.9 Name/Value Header Block
 parse_name_val_pairs(Bin, Z) ->
+    ?LOG("Inflating with Z=~p",[Z]),
     Unpacked = unpack(Z, Bin, ?HEADERS_ZLIB_DICT),
-    zlib:inflateReset(Z),
+%%    zlib:inflateReset(Z),
     <<Num:16/big-unsigned-integer, Rest/binary>> = Unpacked,
     parse_name_val_pairs(Num, Rest, []).
 
@@ -212,6 +216,23 @@ unpack(Z, Compressed, Dict) ->
           Uncompressed ->
                  iolist_to_binary(Uncompressed)
      end.
+
+%% Encode the name/value compressed header block
+encode_name_value_pairs(Headers, Z) when is_list(Headers) ->
+    Num = length(Headers),
+    L = lists:foldl(fun({K,V}, Acc) ->
+        Klen = size(K),
+        Vlen = size(V),
+        [ <<Klen:16/unsigned-big-integer, K/binary, Vlen:16/unsigned-big-integer, V/binary>> | Acc ]
+    end, [<< Num:16/unsigned-big-integer >>], Headers),
+    ToDeflate = iolist_to_binary(lists:reverse(L)),
+    %%io:format("TO DEFLATE: ~p\n",[ToDeflate]),
+    Deflated = iolist_to_binary([ 
+            zlib:deflate(Z, ToDeflate, full)
+        ]),
+    %%io:format("deflated: ~p\n",[Deflated]),
+ %%   zlib:close(Z),
+    Deflated.
 
  %% Various conversions for nicer debugging and matching:
 atom_to_status_code(protocol_error)         -> 1;

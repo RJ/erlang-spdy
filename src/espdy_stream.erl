@@ -12,7 +12,7 @@
 -compile(export_all).
 
 %% API
--export([start_link/6, send_data_fin/1, send_data/2, closed/2, received_data/2,
+-export([start_link/5, send_data_fin/1, send_data/2, closed/2, received_data/2,
          send_response/3, received_fin/1
         ]).
 
@@ -27,12 +27,11 @@
                 mod, 
                 mod_state, 
                 headers, 
-                z_headers, 
                 spdy_opts}).
 
 %% API
-start_link(StreamID, Pid, Headers, Mod, Zcontext, Opts) ->
-    gen_server:start(?MODULE, [StreamID, Pid, Headers, Mod, Zcontext, Opts], []).
+start_link(StreamID, Pid, Headers, Mod, Opts) ->
+    gen_server:start(?MODULE, [StreamID, Pid, Headers, Mod, Opts], []).
 
 send_data(Pid, Data) when is_pid(Pid), is_binary(Data) ->
     gen_server:cast(Pid, {data, Data}).
@@ -55,13 +54,17 @@ send_response(Pid, Headers, Body) ->
 
 %% gen_server callbacks
 
-init([StreamID, Pid, Headers, Mod, __Z, Opts]) ->
+init([StreamID, Pid, Headers, Mod, Opts]) ->
     self() ! init_callback,
-    Z = zlib:open(),
-    ok = zlib:deflateInit(Z),
+%%    Z = zlib:open(),
+%%    ok = zlib:deflateInit(Z),
     %%ok = zlib:deflateInit(Z, best_compression,deflated, 15, 9, default),
-    zlib:deflateSetDictionary(Z, ?HEADERS_ZLIB_DICT),
-    {ok, #state{streamid=StreamID, pid=Pid, mod=Mod, headers=Headers, z_headers=Z, spdy_opts=Opts}}.
+%%    zlib:deflateSetDictionary(Z, ?HEADERS_ZLIB_DICT),
+    {ok, #state{streamid=StreamID, 
+                pid=Pid, 
+                mod=Mod, 
+                headers=Headers, 
+                spdy_opts=Opts}}.
 
 handle_call(_Request, _From, State) ->
     Reply = ok,
@@ -149,7 +152,7 @@ handle_info(init_callback, State) ->
         %% CB module is going to stream us the body data, so we keep this process
         %% alive until we get the fin packet as part of the stream.
    %%%% {ok, Headers, stream, ModState} when is_list(Headers) ->
-   %%%%     NVPairsData = encode_name_value_pairs(Headers, State#state.z_headers),
+   %%%%     NVPairsData = encode_name_value_pairs(Headers, State#state.z_context),
    %%%%     StreamID = State#state.streamid,
    %%%%     F = #cframe{type=?SYN_REPLY,
    %%%%                 flags=0, 
@@ -179,10 +182,9 @@ code_change(_OldVsn, State, _Extra) ->
 
 send_http_response(Headers, Body, State = #state{}) when is_list(Headers), is_binary(Body) ->
     io:format("Respond with: ~p ~p\n",[Headers, Body]),
-    NVPairsData = encode_name_value_pairs(Headers, State#state.z_headers),
     StreamID = State#state.streamid,
     F = #spdy_syn_reply{ streamid = StreamID, 
-                         nvdata = NVPairsData
+                         headers = Headers
                        },
     espdy_session:snd(State#state.pid, StreamID, F),
     %% Send body response in exactly one data frame, with fin set.
@@ -193,22 +195,6 @@ send_http_response(Headers, Body, State = #state{}) when is_list(Headers), is_bi
     espdy_session:snd(State#state.pid, StreamID, F2),
     ok.
 
-%% Encode the name/value compressed header block
-encode_name_value_pairs(Headers, Z) when is_list(Headers) ->
-    Num = length(Headers),
-    L = lists:foldl(fun({K,V}, Acc) ->
-        Klen = size(K),
-        Vlen = size(V),
-        [ <<Klen:16/unsigned-big-integer, K/binary, Vlen:16/unsigned-big-integer, V/binary>> | Acc ]
-    end, [<< Num:16/unsigned-big-integer >>], Headers),
-    ToDeflate = iolist_to_binary(lists:reverse(L)),
-    %%io:format("TO DEFLATE: ~p\n",[ToDeflate]),
-    Deflated = iolist_to_binary([ 
-            zlib:deflate(Z, ToDeflate, full)
-        ]),
-    %%io:format("deflated: ~p\n",[Deflated]),
-    zlib:close(Z),
-    Deflated.
 
 
 both_closed(#state{clientclosed=true,serverclosed=true}) -> true;

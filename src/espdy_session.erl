@@ -31,7 +31,8 @@
     last_server_sid = 0,
     buffer = <<>> :: binary(),
     goingaway = false :: boolean(),
-    z_headers, %% zlib context for headers
+    z_context_inf,  %% zlib context for inflating
+    z_context_def,  %% zlib context for deflating
     settings = [] :: [{integer(), integer()}],
     streams = [] :: [{integer(), #stream{}}] %% use proplist for now
 }).
@@ -41,7 +42,7 @@
 %% @doc Start a SPDY protocol process.
 -spec start_link(inet:socket(), module(), any()) -> {ok, pid()}.
 start_link(Socket, Transport, Opts) ->
-    gen_server:start_link(?MODULE, [Socket, Transport, Opts], []).
+    gen_server:start(?MODULE, [Socket, Transport, Opts], []).
 
 snd(Pid, StreamID, Frame) when is_pid(Pid), is_integer(StreamID) ->
     gen_server:cast(Pid, {snd, StreamID, Frame}).
@@ -50,11 +51,16 @@ snd(Pid, StreamID, Frame) when is_pid(Pid), is_integer(StreamID) ->
 
 init([Socket, Transport, Opts]) ->
     %% Init zlib context used for headers blocks
-    Z = zlib:open(),
-    ok = zlib:inflateInit(Z),
+    Zinf = zlib:open(),
+    ok = zlib:inflateInit(Zinf),
+    Zdef = zlib:open(),
+    ok = zlib:deflateInit(Zdef),
+    %%ok = zlib:deflateInit(Z, best_compression,deflated, 15, 9, default),
+    zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT),
     State = #state{ socket=Socket, 
                     transport=Transport,
-                    z_headers=Z,
+                    z_context_inf=Zinf,
+                    z_context_def=Zdef,
                     spdy_opts=Opts
                   },
     ?LOG("SPDY_PROTO init ~p ~p",[self(), State]),
@@ -94,24 +100,24 @@ handle_info({tcp, Socket, Data}, State = #state{socket=Socket, transport=Transpo
     end,
     Ret.
 
-terminate(_Reason, _State = #state{transport=Transport, socket=Socket, z_headers=Z}) ->
+terminate(_Reason, _State = #state{transport=Transport, socket=Socket}) ->
     catch Transport:close(Socket),
-    catch zlib:close(Z),
+%%    catch zlib:close(Z),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %% Write a packet to the socket, either raw binary, or auto-marshalling control/data frames
-socket_write(F, #state{transport=T,socket=S}) ->
+socket_write(F, #state{transport=T,socket=S, z_context_def=Z}) ->
     ?LOG("Sending frame: ~w",[F]),
-    Packet = espdy_parser:build_frame(F),
+    Packet = espdy_parser:build_frame(F, Z),
     T:send(S, Packet).
 
 
  %% process buffer until no more full frames left
-process_buffer(State = #state{buffer = Buffer}) ->
-    case espdy_parser:parse_frame(Buffer) of
+process_buffer(State = #state{buffer = Buffer, z_context_inf = Z}) ->
+    case espdy_parser:parse_frame(Buffer, Z) of
         %% no full frame yet, read more data
         undefined -> 
             {noreply, State};
@@ -159,7 +165,7 @@ handle_frame(#spdy_syn_stream{  flags=Flags,
                                         streamid=StreamID, 
                                         associd=AssocStreamID, 
                                         priority=Priority, 
-                                        nvdata=NVPairsData
+                                        headers=Headers
                                      }, State=#state{}) ->
     %% If the client is initiating the stream, the Stream-ID must be odd. 
     %% 0 is not a valid Stream-ID. Stream-IDs from each side of the connection 
@@ -177,12 +183,10 @@ handle_frame(#spdy_syn_stream{  flags=Flags,
             stream_error(protocol_error, S, State),
             State;
         undefined -> 
-            Headers = espdy_parser:parse_name_val_pairs(NVPairsData, State#state.z_headers),
            {ok, Pid} = espdy_stream:start_link(StreamID, 
                                                self(), 
                                                Headers, 
                                                espdy_stream_http,  %% TODO variable
-                                               State#state.z_headers,
                                                State#state.spdy_opts),
             %% TODO pass fin into startlink?
             hasflag(Flags,?DATA_FLAG_FIN) andalso espdy_stream:received_fin(Pid),
@@ -202,7 +206,7 @@ handle_frame(#spdy_syn_stream{  flags=Flags,
 
 handle_frame(#spdy_syn_reply{ flags = Flags,
                                       streamid = StreamID,
-                                      nvdata=_NVPairsData }, State=#state{}) ->
+                                      headers=_H }, State=#state{}) ->
     case lookup_stream(StreamID, State) of
         undefined -> 
             session_error(protocol_error, State), %% TODO what sort of error?
@@ -256,13 +260,12 @@ handle_frame(#spdy_goaway{lastgoodid=_LastGoodStreamID}, State=#state{}) ->
 
 handle_frame(#spdy_headers{ streamid=StreamID,
                             flags=Flags,
-                            nvdata=NVPairsData }, State=#state{}) ->
+                            headers=Headers }, State=#state{}) ->
     case lookup_stream(StreamID, State) of
         undefined ->
             session_error(protocol_error, State), %% TODO which error?
             State;
         S=#stream{headers=H} ->
-            Headers = espdy_parser:parse_name_val_pairs(NVPairsData, State#state.z_headers),
             H2 = merge_headers(Headers, H),
             NewStream = S#stream{headers=H2},
             NewState = update_stream(StreamID, NewStream, State),

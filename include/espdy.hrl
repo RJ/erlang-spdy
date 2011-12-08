@@ -22,13 +22,13 @@
     streamid    :: integer(),
     associd     :: integer(),
     priority    :: integer(),
-    nvdata      :: binary()
+    headers     :: list()
 }).
 -record(spdy_syn_reply, {
     version = 2 :: integer(), 
     flags = 0   :: integer(),
     streamid    :: integer(),
-    nvdata      :: binary()
+    headers     :: list()
 }).
 -record(spdy_rst_stream, {
     version = 2 :: integer(), 
@@ -56,7 +56,7 @@
     version = 2 :: integer(), 
     flags = 0   :: integer(),
     streamid    :: integer(),
-    nvdata      :: binary()
+    headers     :: list()
 }).
 
 %% STREAMS

@@ -34,16 +34,28 @@ init(_Id, Headers, SpdyOpts) ->
         true -> 
             {error, not_http};
         false ->
-            %% Ignore the request, and just return a static page response:
-            ResponseHeaders = [ 
-                {<<"url">>, <<"http://localhost:6121/">>}, %% url only needed in push streams usually?
-                {<<"status">>, <<"200 OK">>},
-                {<<"version">>, <<"HTTP/1.1">>},
-                {<<"content-type">>, <<"text/plain">>},
-                {<<"content-length">>, <<"16">>}
-            ],
-            Body = <<"Hello SPDY World">>,
-            {ok, ResponseHeaders, Body}
+            case Url of
+                <<"/">> ->
+                    %% Ignore the request, and just return a static page response:
+                    ResponseHeaders = [ 
+                        {<<"url">>, <<"http://localhost:6121/">>}, %% url only needed in push streams usually?
+                        {<<"status">>, <<"200 OK">>},
+                        {<<"version">>, <<"HTTP/1.1">>},
+                        {<<"content-type">>, <<"text/plain">>},
+                        {<<"content-length">>, <<"16">>}
+                    ],
+                    Body = <<"Hello SPDY World">>,
+                    {ok, ResponseHeaders, Body};
+                _ ->
+                    ResponseHeaders = [ 
+                        {<<"status">>, <<"400 Not Found">>},
+                        {<<"version">>, <<"HTTP/1.1">>},
+                        {<<"content-type">>, <<"text/html">>}
+%                        {<<"content-length">>, <<"16">>}
+                    ],
+                    Body = <<"<h1>NOT FOUND</h1>">>,
+                    {ok, ResponseHeaders, Body}
+            end
     end.
 
 %% Called when the SPDY session terminates
