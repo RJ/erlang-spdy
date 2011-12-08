@@ -5,7 +5,7 @@ This is a library application designed to make it easy to add SPDY support to
 other erlang apps, specifically webservers like cowboy, misultin and mochiweb.
 
 This app does contain a basic demo server which just returns a "Hello World"
-response to any GET request received over SPDY. You should really use an
+response to a GET / request received over SPDY. You should really use an
 existing server, or at least a more robust tcp listener/acceptor method.
 
 To run the demo server:
@@ -16,7 +16,15 @@ To run the demo server:
 
 Current Status
 --------------
-TODO
+
+The demo serves up a nice hardcoded page, and can handle a SPDY v2 session
+properly to chrome.
+
+It doesn't do SETTINGS yet (keyvals that persist between sessions)
+
+No flow control, although that got pushed into SPDY/3 anyway
+
+Probably some other stuff to mention here.
 
 Testing SPDY with Chrome
 ------------------------
@@ -45,12 +53,16 @@ NB: This is somewhat aspirational, not all of this is wired up yet
 
 This library is useful once you have accepted a socket that will be used for
 the SPDY protocol. Once accepted, you start a `espdy_session` process,
-providing a callback module.
+providing a callback module. (See the demo server).
 
 `espdy_session` will spawn a `espdy_stream` process for each new stream.
 
 `espdy_stream` uses the callback module to respond to SPDY requests.
 
+Two zlib contexts are maintained for each session. For inflating and deflating.
+
+`espdy_parser` takes care of all the binary-to-record work and visa-versa, and
+requires a compression context to use.
 
 SPDY Resources
 --------------
