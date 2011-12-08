@@ -13,14 +13,22 @@
 
 %% API
 -export([start_link/6, send_data_fin/1, send_data/2, closed/2, received_data/2,
-         send_response/3
+         send_response/3, received_fin/1
         ]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
      terminate/2, code_change/3]).
 
--record(state, {streamid, pid, mod, mod_state, headers, z_headers, spdy_opts}).
+-record(state, {streamid, 
+                clientclosed = false, %% them
+                serverclosed = false, %% us
+                pid, 
+                mod, 
+                mod_state, 
+                headers, 
+                z_headers, 
+                spdy_opts}).
 
 %% API
 start_link(StreamID, Pid, Headers, Mod, Zcontext, Opts) ->
@@ -37,6 +45,9 @@ closed(Pid, Reason) when is_pid(Pid) ->
 
 received_data(Pid, Data) ->
     gen_server:cast(Pid, {received_data, Data}).
+
+received_fin(Pid) ->
+    gen_server:cast(Pid, received_fin).
 
 send_response(Pid, Headers, Body) ->
     gen_server:cast(Pid, {send_response, Headers, Body}).
@@ -56,6 +67,19 @@ handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
 
+handle_cast(received_fin, State = #state{clientclosed=true}) ->
+    ?LOG("Got FIN but client has already closed?", []),
+    {stop, {stream_error, protocol_error}, State};
+
+handle_cast(received_fin, State = #state{clientclosed=false}) ->
+    NewState = State#state{clientclosed=true},
+    case both_closed(NewState) of
+        true  -> ?LOG("Both ends closed, stopping stream ~w",[State#state.streamid]),
+                 {stop, normal, NewState};
+        false -> ?LOG("Client closed, server not. stream ~w",[State#state.streamid]),
+                 {noreply, NewState}
+    end;
+
 handle_cast({received_data, Data}, State) ->
     {ok, NewModState} = (State#state.mod):handle_data(Data, State#state.mod_state),
     {noreply, State#state{mod_state=NewModState}};
@@ -70,28 +94,38 @@ handle_cast({closed, Reason}, State) ->
 
 %% part of streamed body
 handle_cast({data, Bin, false}, State) when is_binary(Bin) ->
-    F = #dframe{streamid = State#state.streamid,
-                flags=0,
-                length=size(Bin),
-                data=Bin},
+    F = #spdy_data{ streamid = State#state.streamid,
+                    data=Bin},
     espdy_session:snd(State#state.pid, State#state.streamid, F),
     {noreply, State};
 
 %% last of streamed body
 handle_cast({data, Bin, true}, State) when is_binary(Bin) ->
-    F = #dframe{streamid = State#state.streamid,
-                flags=?DATA_FLAG_FIN,
-                length=size(Bin),
-                data=Bin},
+    F = #spdy_data{ streamid = State#state.streamid,
+                    flags=?DATA_FLAG_FIN,
+                    data=Bin},
     espdy_session:snd(State#state.pid, State#state.streamid, F),
-    {stop, normal, State};
+    NewState = State#state{serverclosed=true},
+    case both_closed(NewState) of
+        true  -> ?LOG("Both ends closed, stopping stream ~w",[State#state.streamid]),
+                 {stop, normal, NewState};
+        false -> ?LOG("We are closed, client not. stream ~w",[State#state.streamid]),
+                 {noreply, NewState}
+    end;
 
 handle_cast({send_response, Headers, Body}, State) ->
     send_http_response(Headers, Body, State),
-    %% stream is closed after replying
-    {stop, normal, State}.
+    NewState = State#state{serverclosed=true},
+    case both_closed(NewState) of
+        true  -> ?LOG("Both ends closed, stopping stream ~w",[State#state.streamid]),
+                 {stop, normal, NewState};
+        false -> ?LOG("We are closed, client not. stream ~w",[State#state.streamid]),
+                 {noreply, NewState}
+    end.
     
 
+%% Called when we got a syn_stream for this stream.
+%% cb module is supposed to make and send the reply.
 handle_info(init_callback, State) ->
     case (State#state.mod):init(self(), State#state.headers, State#state.spdy_opts) of
         %% In this case, the callback module provides the full response
@@ -99,7 +133,13 @@ handle_info(init_callback, State) ->
         %% so we can terminate this process after replying.
         {ok, Headers, Body} when is_list(Headers), is_binary(Body) ->
             send_http_response(Headers, Body, State),
-            {stop, normal, State};
+            NewState = State#state{serverclosed=true},
+            case both_closed(NewState) of
+                true  -> ?LOG("Both ends closed, stopping stream ~w",[State#state.streamid]),
+                         {stop, normal, NewState};
+                false -> ?LOG("We are closed, client not. stream ~w",[State#state.streamid]),
+                         {noreply, NewState}
+            end;
         %% The callback module will call msg us the send_http_response
         %% (typically from within the guts of cowboy_http_req, so that
         %%  we can reuse the existing http API)
@@ -124,11 +164,7 @@ handle_info(init_callback, State) ->
         %% CB module can't respond, because request is invalid
         {error, not_http} ->
             StreamID = State#state.streamid,
-            F = #cframe{type=?RST_STREAM,
-                        length=8,
-                        data = <<0:1, 
-                                 StreamID:31/big-unsigned-integer, 
-                                 ?PROTOCOL_ERROR:32/big-unsigned-integer>>},
+            F = #spdy_rst_stream{ streamid=StreamID, statuscode=?PROTOCOL_ERROR },
             espdy_session:snd(State#state.pid, StreamID, F),
             {stop, normal, State}
     end.
@@ -145,21 +181,15 @@ send_http_response(Headers, Body, State = #state{}) when is_list(Headers), is_bi
     io:format("Respond with: ~p ~p\n",[Headers, Body]),
     NVPairsData = encode_name_value_pairs(Headers, State#state.z_headers),
     StreamID = State#state.streamid,
-    F = #cframe{type=?SYN_REPLY,
-                flags=0, 
-                length = 6 + byte_size(NVPairsData),
-                data= <<0:1, 
-                        StreamID:31/big-unsigned-integer, 
-                        0:16/big-unsigned-integer, %% UNUSED
-                        NVPairsData/binary>>
-                    },
+    F = #spdy_syn_reply{ streamid = StreamID, 
+                         nvdata = NVPairsData
+                       },
     espdy_session:snd(State#state.pid, StreamID, F),
     %% Send body response in exactly one data frame, with fin set.
     %% TODO fragment this if we hit some maximum frame size?
-    F2 = #dframe{streamid=StreamID, 
-                 flags=?DATA_FLAG_FIN,
-                 length=size(Body),
-                 data=Body},
+    F2 = #spdy_data{streamid=StreamID, 
+                    flags=?DATA_FLAG_FIN,
+                    data=Body},
     espdy_session:snd(State#state.pid, StreamID, F2),
     ok.
 
@@ -179,3 +209,7 @@ encode_name_value_pairs(Headers, Z) when is_list(Headers) ->
     %%io:format("deflated: ~p\n",[Deflated]),
     zlib:close(Z),
     Deflated.
+
+
+both_closed(#state{clientclosed=true,serverclosed=true}) -> true;
+both_closed(_) -> false.

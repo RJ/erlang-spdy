@@ -94,7 +94,7 @@ handle_info({tcp, Socket, Data}, State = #state{socket=Socket, transport=Transpo
     end,
     Ret.
 
-terminate(_Reason, State = #state{transport=Transport, socket=Socket, z_headers=Z}) ->
+terminate(_Reason, _State = #state{transport=Transport, socket=Socket, z_headers=Z}) ->
     catch Transport:close(Socket),
     catch zlib:close(Z),
     ok.
@@ -102,111 +102,29 @@ terminate(_Reason, State = #state{transport=Transport, socket=Socket, z_headers=
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-%%% Internal functions
-
 %% Write a packet to the socket, either raw binary, or auto-marshalling control/data frames
-socket_write(F=#dframe{streamid=StreamID,
-                       flags=Flags,
-                       length=Length,
-                       data=Data}, #state{transport=T,socket=S}) ->
-    ?LOG("Sending frame: ~p",[F]),
-    Packet = << 0:1, 
-                StreamID:31/big-unsigned-integer,
-                Flags:8/big-unsigned-integer, 
-                Length:24/big-unsigned-integer,
-                Data/binary
-             >>,
-    ?LOG("SEND (~p/~p): ~p",[Length, size(Data),Packet]),
-    T:send(S, Packet);
-
-socket_write(F=#cframe{type=Type, 
-                     version=Version, 
-                     flags=Flags, 
-                     length=Length, 
-                     data=Data}, #state{transport=T,socket=S}) ->
-    ?LOG("Sending frame: ~p",[F]),
-    Packet = << 1:1,
-                Version:15/big-unsigned-integer, 
-                Type:16/big-unsigned-integer, 
-                Flags:8/big-unsigned-integer, 
-                Length:24/big-unsigned-integer,
-                Data/binary
-            >>,
-    ?LOG("SEND (~p/~p): ~p",[Length, size(Data),Packet]),
+socket_write(F, #state{transport=T,socket=S}) ->
+    ?LOG("Sending frame: ~w",[F]),
+    Packet = espdy_parser:build_frame(F),
     T:send(S, Packet).
 
-unpack(Z, Compressed, Dict) ->
-    case catch zlib:inflate(Z, Compressed) of
-         {'EXIT',{{need_dictionary,_DictID},_}} ->
-                 zlib:inflateSetDictionary(Z, Dict),
-                 iolist_to_binary(zlib:inflate(Z, []));
-          Uncompressed ->
-                 iolist_to_binary(Uncompressed)
-     end.
 
  %% process buffer until no more full frames left
 process_buffer(State = #state{buffer = Buffer}) ->
-    case parse_frame(Buffer) of
+    case espdy_parser:parse_frame(Buffer) of
         %% no full frame yet, read more data
         undefined -> 
             {noreply, State};
-        %% control frame received
-        {F = #cframe{}, Rest} ->
-            NewState = handle_control_frame(F, State#state{buffer=Rest}),
-            %% could be another frame in the buffer:
-            process_buffer(NewState);
-        %% data frame received
-        {F = #dframe{}, Rest} ->
-            NewState = handle_data_frame(F, State#state{buffer=Rest}),
+        {undefined, Rest} ->
+            ?LOG("Dropped unhandled control frame",[]),
+            process_buffer(State#state{buffer=Rest});
+        %% frame received
+        {F, Rest} when is_tuple(F) -> %% will by a #spdy_ record
+            ?LOG("GOT FRAME: ~w",[F]),
+            NewState = handle_frame(F, State#state{buffer=Rest}),
             %% could be another frame in the buffer:
             process_buffer(NewState)
     end.
-
-%% Match CONTROL frame
-%% +----------------------------------+
-%% |C| Version(15bits) | Type(16bits) |
-%% +----------------------------------+
-%% | Flags (8)  |  Length (24 bits)   |
-%% +----------------------------------+
-%% |               Data               |
-%% +----------------------------------+
-parse_frame(<<  1:1, %% control bit
-                Version:15/big-unsigned-integer, 
-                Type:16/big-unsigned-integer, 
-                Flags:8/big-unsigned-integer, 
-                Length:24/big-unsigned-integer,
-                Data:Length/binary-unit:8,
-                Rest/binary
-            >>) ->
-    {#cframe{version=Version,
-             type=Type,
-             flags=Flags,
-             length=Length,
-             data=Data}, Rest};
-
-%% Match DATA frame
-%% +----------------------------------+
-%% |C|       Stream-ID (31bits)       |
-%% +----------------------------------+
-%% | Flags (8)  |  Length (24 bits)   |
-%% +----------------------------------+
-%% |               Data               |
-%% +----------------------------------+
-parse_frame(<<  0:1, %% control big clear = data
-                StreamID:31/big-unsigned-integer,
-                Flags:8/big-unsigned-integer, 
-                Length:24/big-unsigned-integer,
-                Data:Length/binary-unit:8,
-                Rest/binary
-             >>) ->
-    {#dframe{streamid=StreamID,
-             flags=Flags,
-             length=Length,
-             data=Data}, Rest};
-
-%% No full frame found:
-parse_frame(_Buffer) ->
-    undefined. 
 
 %% MANAGEMENT OF ACTIVE STREAMS 
 %% stored in a proplist for now.
@@ -225,25 +143,6 @@ remove_stream(Id, State=#state{streams=Slist}) when is_integer(Id), Id > 0 ->
 %% END MANAGEMENT OF ACTIVE STREAMS 
 
 
-%% 2.6.9 Name/Value Header Block
-parse_name_val_pairs(Bin, State) ->
-    Unpacked = unpack(State#state.z_headers, Bin, ?HEADERS_ZLIB_DICT),
-    zlib:inflateReset(State#state.z_headers),
-    <<Num:16/big-unsigned-integer, Rest/binary>> = Unpacked,
-    parse_name_val_pairs(Num, Rest, []).
-
-parse_name_val_pairs(0, _, Acc) -> 
-    lists:reverse(Acc);
-parse_name_val_pairs(Num, << NameLen:16/big-unsigned-integer,
-                    Name:NameLen/binary,
-                    ValLen:16/big-unsigned-integer,
-                    Val:ValLen/binary,
-                    Rest/binary >>, Acc) ->
-    %% TODO validate and throw errors as per 2.6.9
-    Pair = {Name, Val},
-    parse_name_val_pairs(Num-1, Rest, [Pair | Acc]).
-%% END nvpair stuff
-
 
 
 merge_headers(NewList, OldList) ->
@@ -256,18 +155,15 @@ hasflag(Flags, Flag) -> (Flags band Flag) == Flag.
 %% CONTROL FRAMES:
 
 %% The SYN_STREAM control frame allows the sender to asynchronously create a stream between the endpoints.
-handle_control_frame(#cframe{   type = ?SYN_STREAM,
-                                version = 2,
-                                flags=Flags,
-                                data = << _:1, StreamID:31/big-unsigned-integer,
-                                          _:1, AssocStreamID:31/big-unsigned-integer,
-                                          Priority:2/big-unsigned-integer, %% size is 3 in v3
-                                          _Unused:14/binary-unit:1, %% size is 12 in v3
-                                          NVPairsData/binary
-                                       >>
-                                }, State=#state{}) ->
-    %% If the client is initiating the stream, the Stream-ID must be odd. 0 is not a valid Stream-ID.
-    %% Stream-IDs from each side of the connection must increase monotonically as new streams are created.
+handle_frame(#spdy_syn_stream{  flags=Flags, 
+                                        streamid=StreamID, 
+                                        associd=AssocStreamID, 
+                                        priority=Priority, 
+                                        nvdata=NVPairsData
+                                     }, State=#state{}) ->
+    %% If the client is initiating the stream, the Stream-ID must be odd. 
+    %% 0 is not a valid Stream-ID. Stream-IDs from each side of the connection 
+    %% must increase monotonically as new streams are created.
     case StreamID =:= 0 orelse 
          StreamID rem 2 =:= 0 orelse
          StreamID =< State#state.last_client_sid of
@@ -281,58 +177,54 @@ handle_control_frame(#cframe{   type = ?SYN_STREAM,
             stream_error(protocol_error, S, State),
             State;
         undefined -> 
-            Headers = parse_name_val_pairs(NVPairsData, State),
+            Headers = espdy_parser:parse_name_val_pairs(NVPairsData, State#state.z_headers),
            {ok, Pid} = espdy_stream:start_link(StreamID, 
-                                                     self(), 
-                                                     Headers, 
-                                                     espdy_stream_http, 
-                                                     State#state.z_headers,
-                                                     State#state.spdy_opts),
+                                               self(), 
+                                               Headers, 
+                                               espdy_stream_http,  %% TODO variable
+                                               State#state.z_headers,
+                                               State#state.spdy_opts),
+            %% TODO pass fin into startlink?
+            hasflag(Flags,?DATA_FLAG_FIN) andalso espdy_stream:received_fin(Pid),
             S = #stream{id=StreamID,
                         pid=Pid,
                         associd=AssocStreamID,
                         priority=Priority,
                         headers=Headers,
-                        clientclosed=hasflag(Flags, ?CONTROL_FLAG_UNIDIRECTIONAL),
-                        fin=hasflag(Flags, ?CONTROL_FLAG_FIN),
                         syn_replied=true %% since we are about to send one
                        },
             ?LOG("NEW STREAM: ~p",[S]),
-            NewState = State#state{ streams = [ {StreamID, S} | State#state.streams ] },
+            NewState = State#state{ streams = [ {StreamID, S} | State#state.streams ],
+                                    last_client_sid = StreamID 
+                                  },
             NewState
     end;
 
-handle_control_frame(#cframe{   type = ?SYN_REPLY, %% stream creation initiated by us was accepted
-                                flags = Flags,
-                                data = << _:1, StreamID:31/big-unsigned-integer,
-                                          _NVPairsData/binary
-                                       >>
-                                }, State=#state{}) ->
+handle_frame(#spdy_syn_reply{ flags = Flags,
+                                      streamid = StreamID,
+                                      nvdata=_NVPairsData }, State=#state{}) ->
     case lookup_stream(StreamID, State) of
         undefined -> 
             session_error(protocol_error, State), %% TODO what sort of error?
             State;
         S = #stream{syn_replied=true} ->
-            %% If an endpoint receives multiple SYN_REPLY frames for the same active stream ID, 
-            %% it MUST issue a stream error (Section 2.4.2) with the error code STREAM_IN_USE.
+            %% If an endpoint receives multiple SYN_REPLY frames for the same
+            %% active stream ID, it MUST issue a stream error (Section 2.4.2) 
+            %% with the error code STREAM_IN_USE.
             stream_error(stream_in_use, S, State),
             State;
         S = #stream{} ->
             %% TODO a stream we initiated is now set up and ready to rock.. tell someone?
-            NewS = S#stream{syn_replied=true, clientclosed=hasflag(Flags,?CONTROL_FLAG_FIN)},
+            NewS = S#stream{syn_replied=true},
+            hasflag(Flags,?DATA_FLAG_FIN) andalso espdy_stream:received_fin(S#stream.pid),
             NewState = update_stream(StreamID, NewS, State),
             NewState
     end;
 
-handle_control_frame(#cframe{   type = ?RST_STREAM, %% RST_STREAM
-                                flags = 0,
-                                length = 8,
-                                data = << _:1, StreamID:31/big-unsigned-integer,
-                                          StatusCode:32/big-unsigned-integer
-                                       >>
-                                }, State=#state{}) ->
-    Status = status_code_to_atom(StatusCode),
-    io:format("RST_STREAM ~p status: ~p",[StreamID, Status]),
+handle_frame(#spdy_rst_stream{ streamid=StreamID, 
+                                       statuscode=StatusCode }, State=#state{}) ->
+    Status = espdy_parser:status_code_to_atom(StatusCode),
+    ?LOG("RST_STREAM ~p status: ~p",[StreamID, Status]),
     case lookup_stream(StreamID, State) of
         undefined ->
             session_error(protocol_error, State),
@@ -343,133 +235,76 @@ handle_control_frame(#cframe{   type = ?RST_STREAM, %% RST_STREAM
             NewState
     end;
 
-handle_control_frame(#cframe{   type = ?SETTINGS, %% SETTINGS
-                                flags=_Flags,
-                                data = << SettingsData >>
-                              }, State=#state{}) ->
-    Settings = parse_settings(SettingsData),
-    NewState = apply_settings(Settings, State),
+handle_frame(#spdy_settings{ flags=_Flags, 
+                             settings=Settings }, State=#state{}) ->
+    NewState = apply_settings( Settings, State),
     NewState;
 
-handle_control_frame(#cframe{   type=?NOOP,
-                                version=2,
-                                length=0}, State=#state{}) ->
+handle_frame(#spdy_noop{}, State) ->
     State;
 
-handle_control_frame(F=#cframe{ type = ?PING,
-                                length = 4,
-                                data = << _PingID:32/big-unsigned-integer >>
-                              }, State=#state{}) ->
-    ?LOG("GOT PING",[]),
+handle_frame(F=#spdy_ping{}, State=#state{}) ->
     socket_write(F, State), 
     State;
 
-handle_control_frame(#cframe{   type = ?GOAWAY,
-                                length = 4,
-                                data = << _:1, _LastGoodStreamID:31/big-unsigned-integer >> %% in v3: , StatusCode:32/big-unsigned-integer >>
-                              }, State=#state{}) ->
+handle_frame(#spdy_goaway{lastgoodid=_LastGoodStreamID}, State=#state{}) ->
     lists:foreach(fun(#stream{pid=Pid}) ->
                 espdy_stream:closed(Pid, goaway)
     end, State#state.streams),
     exit(normal), %% TODO shouldn't exit here, need to flush buffers?
     State#state{goingaway=true};
 
-handle_control_frame(#cframe{   type = ?HEADERS,
-                                data = << _:1, StreamID:31/big-unsigned-integer,
-                                          _Unused:16/binary, %% not in v3?
-                                          NVPairsData/binary
-                                       >>
-                                }, State=#state{}) ->
+handle_frame(#spdy_headers{ streamid=StreamID,
+                            flags=Flags,
+                            nvdata=NVPairsData }, State=#state{}) ->
     case lookup_stream(StreamID, State) of
         undefined ->
             session_error(protocol_error, State), %% TODO which error?
             State;
         S=#stream{headers=H} ->
-            Headers = parse_name_val_pairs(NVPairsData, State),
+            Headers = espdy_parser:parse_name_val_pairs(NVPairsData, State#state.z_headers),
             H2 = merge_headers(Headers, H),
             NewStream = S#stream{headers=H2},
             NewState = update_stream(StreamID, NewStream, State),
             espdy_stream:headers_updated(S#stream.pid, Headers, H2),
+            hasflag(Flags,?DATA_FLAG_FIN) andalso espdy_stream:received_fin(S#stream.pid),
             NewState
     end;
-
-%% TODO lots of flow control stuff to do (read 2.6.8 again..) v3 ONLY!
-handle_control_frame(#cframe{   type = 9, %% WINDOW_UPDATE
-                                length=8,
-                                data = << _:1, StreamID:31/big-unsigned-integer,
-                                          _:1, DeltaWindowSize:31/big-unsigned-integer
-                                       >>
-                                }, State=#state{}) when DeltaWindowSize >= 1, DeltaWindowSize =< 16#7fffffff ->
-    case lookup_stream(StreamID, State) of
-        undefined ->
-            session_error(protocol_error, State), %% TODO which error?
-            State;
-        S=#stream{window=W} ->
-            NewStream = S#stream{window=W+DeltaWindowSize},
-            NewState = update_stream(StreamID, NewStream, State),
-            NewState
-    end;
-
-    %% If an endpoint receives a control frame for a type it does not recognize, it MUST ignore the frame:
-handle_control_frame(F = #cframe{}, State=#state{}) ->
-    ?LOG("UNHANDLED CONTROL FRAME: ~p",[F]),
-    State.
 
 %% DATA FRAME:
-handle_data_frame(#dframe{  streamid=StreamID,
-                            flags=Flags,
-                            data=Data
-                         }, State=#state{}) ->
+handle_frame(#spdy_data{ streamid=StreamID,
+                         flags=Flags,
+                         data=Data }, State=#state{}) ->
     case lookup_stream(StreamID, State) of
         undefined ->
-            StatusCode = ?INVALID_STREAM,
-            F = #cframe{type=?RST_STREAM,
-                        length=8,
-                        data = <<0:1, StreamID:31/big-unsigned-integer, StatusCode:32/big-unsigned-integer>>},
+            F = #spdy_rst_stream{version=2,
+                                 streamid=StreamID, 
+                                 statuscode=?INVALID_STREAM},
             socket_write(F, State),
             State;
         S = #stream{} -> %% TODO check stream is known to be active still?
             espdy_stream:received_data(S#stream.pid, Data),
-            case hasflag(Flags,?DATA_FLAG_FIN) of
-                false ->
-                    State;
-                true ->
-                    NewS = S#stream{fin=true},
-                    NewState = update_stream(StreamID, NewS, State),
-                    NewState
-            end
+            hasflag(Flags,?DATA_FLAG_FIN) andalso espdy_stream:received_fin(S#stream.pid),
+            State
     end.
 
-session_error(Err, State = #state{}) ->
-    StatusCode = atom_to_status_code(Err),
+session_error(_Err, State = #state{}) ->
     LastGoodStreamID = State#state.last_client_sid,
-    F = #cframe{type=7, %% GOAWAY
-                length=8,
-                data = << 0:1, LastGoodStreamID:31/big-unsigned-integer,
-                          StatusCode:32/big-unsigned-integer >>},
+    F = #spdy_goaway{version=2,
+                     lastgoodid=LastGoodStreamID},
     socket_write(F, State),
     exit(normal).
 
 stream_error(Err, #stream{id=Id}, State = #state{}) ->
-    StatusCode = atom_to_status_code(Err),
-    F = #cframe{type=3, %% RST_STREAM
-                length=8,
-                data = <<0:1, Id:31/big-unsigned-integer, StatusCode:32/big-unsigned-integer>>},
+    StatusCode = espdy_parser:atom_to_status_code(Err),
+    F = #spdy_rst_stream{version=2,
+                         streamid=Id,
+                         statuscode=StatusCode},
     socket_write(F, State),
     %% close/delete stream:
     NewState = remove_stream(Id, State),
     NewState.
 
-parse_settings(<<Num:32/big-unsigned-integer, Data/binary>>) ->
-    take_settingpair(Num, Data, []).
-
-take_settingpair(0, _, Acc) -> lists:reverse(Acc);
-take_settingpair(Num, <<Flags:8/big-unsigned-integer,
-                        Id:24/big-unsigned-integer,
-                        Value:32/big-unsigned-integer,
-                        Rest/binary>>, Acc) ->
-    Item = {Id, Flags, Value},
-    take_settingpair(Num-1, Rest, [Item|Acc]).
 
 apply_settings(Settings, State = #state{settings=OldSettings}) ->
     %% TODO persist settings somehow, if flags has perist bit set for a value
@@ -479,21 +314,4 @@ apply_settings(Settings, State = #state{settings=OldSettings}) ->
     State#state{settings=NewSettings}.
 %% STATUS CODES used by rst-stream, goaway, etc
 
-atom_to_status_code(protocol_error)         -> 1;
-atom_to_status_code(invalid_stream)         -> 2;
-atom_to_status_code(refused_stream)         -> 3;
-atom_to_status_code(unsupported_version)    -> 4;
-atom_to_status_code(cancel)                 -> 5;
-atom_to_status_code(flow_control_error)     -> 6;
-atom_to_status_code(stream_in_use)          -> 7;
-atom_to_status_code(stream_already_closed ) -> 8.
-
-status_code_to_atom(1)  -> protocol_error;
-status_code_to_atom(2)  -> invalid_stream;
-status_code_to_atom(3)  -> refused_stream;
-status_code_to_atom(4)  -> unsupported_version;
-status_code_to_atom(5)  -> cancel;
-status_code_to_atom(6)  -> flow_control_error;
-status_code_to_atom(7)  -> stream_in_use;
-status_code_to_atom(8)  -> stream_already_closed.
 

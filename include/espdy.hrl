@@ -9,20 +9,54 @@
 -define(HEADERS_ZLIB_DICT, <<"optionsgetheadpostputdeletetraceacceptaccept-charsetaccept-encodingaccept-languageauthorizationexpectfromhostif-modified-sinceif-matchif-none-matchif-rangeif-unmodifiedsincemax-forwardsproxy-authorizationrangerefererteuser-agent100101200201202203204205206300301302303304305306307400401402403404405406407408409410411412413414415416417500501502503504505accept-rangesageetaglocationproxy-authenticatepublicretry-afterservervarywarningwww-authenticateallowcontent-basecontent-encodingcache-controlconnectiondatetrailertransfer-encodingupgradeviawarningcontent-languagecontent-lengthcontent-locationcontent-md5content-rangecontent-typeetagexpireslast-modifiedset-cookieMondayTuesdayWednesdayThursdayFridaySaturdaySundayJanFebMarAprMayJunJulAugSepOctNovDecchunkedtext/htmlimage/pngimage/jpgimage/gifapplication/xmlapplication/xhtmltext/plainpublicmax-agecharset=iso-8859-1utf-8gzipdeflateHTTP/1.1statusversionurl",0>>).
 
 %% DATA FRAMES:
--record(dframe, {   
+-record(spdy_data, {   
     streamid :: integer(), 
     flags = 0 :: integer(),
-    length :: integer(),
     data :: binary()
 }).
 
 %% CONTROL FRAMES:
--record(cframe, {
-    version = ?SPDY_VERSION :: integer(), 
-    type :: integer(),
-    flags = 0 :: integer(),
-    length :: integer(),
-    data :: binary()
+-record(spdy_syn_stream, {
+    version = 2 :: integer(), 
+    flags = 0   :: integer(),
+    streamid    :: integer(),
+    associd     :: integer(),
+    priority    :: integer(),
+    nvdata      :: binary()
+}).
+-record(spdy_syn_reply, {
+    version = 2 :: integer(), 
+    flags = 0   :: integer(),
+    streamid    :: integer(),
+    nvdata      :: binary()
+}).
+-record(spdy_rst_stream, {
+    version = 2 :: integer(), 
+    flags = 0   :: integer(),
+    streamid    :: integer(),
+    statuscode  :: integer()
+}).
+-record(spdy_settings, {
+    version = 2 :: integer(), 
+    flags = 0   :: integer(),
+    settings    :: list()
+}).
+-record(spdy_noop, {
+    version = 2 :: integer()
+}).
+-record(spdy_ping, {
+    version = 2 :: integer(), 
+    id          :: integer()
+}).
+-record(spdy_goaway, {
+    version = 2 :: integer(), 
+    lastgoodid  :: integer()
+}).
+-record(spdy_headers, {
+    version = 2 :: integer(), 
+    flags = 0   :: integer(),
+    streamid    :: integer(),
+    nvdata      :: binary()
 }).
 
 %% STREAMS
@@ -33,13 +67,12 @@
     pid,
     associd = 0 :: integer(),
     headers = [] :: list(), %% Streams optionally carry a set of name/value header pairs.
-    clientclosed = false, %% them
-    serverclosed = false, %% us
+%%    clientclosed = false, %% them
+%%    serverclosed = false, %% us
     priority :: integer(), %% The creator of a stream assigns a priority for that stream. 
                            %% Priority is represented as an integer from 0 to 7. 
                            %% 0 represents the highest priority and 7 represents the lowest priority.
     syn_replied = false :: boolean(), %% true once syn_reply was seen/sent
-    fin = false :: boolean(), %% seen FLAG_FIN?
     window = 64*1024 :: integer() %% default transmit window size is 64KB
 }).
 
