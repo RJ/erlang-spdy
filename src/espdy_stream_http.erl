@@ -35,7 +35,25 @@ init(_Id, Headers, SpdyOpts) ->
             {error, not_http};
         false ->
             case Url of
+                <<"/settings-me">> ->
+                    %% invent some settings to save
+                    Settings = [ 
+                                 {?SETTINGS_ROUND_TRIP_TIME,        { ?SETTINGS_FLAG_PERSIST_VALUE, 42}},
+                                 {?SETTINGS_MAX_CONCURRENT_STREAMS, { ?SETTINGS_FLAG_PERSIST_VALUE, 9999 }}
+                               ],
+                    F = #spdy_settings{ flags=?SETTINGS_FLAG_CLEAR_PREVIOUSLY_PERSISTED_SETTINGS, settings=Settings},
+                    espdy_stream:send_frame(self(), F),
+                    ResponseHeaders = [ 
+                        {<<"url">>, <<"http://localhost:6121/settings-me">>}, %% url only needed in push streams usually?
+                        {<<"status">>, <<"200 OK">>},
+                        {<<"version">>, <<"HTTP/1.1">>},
+                        {<<"content-type">>, <<"text/plain">>}
+                    ],
+                    Body = <<"This stream sent a settings frame, informing your browser that the server supports 9999 max concurrent streams">>,
+                    {ok, ResponseHeaders, Body};
+
                 <<"/">> ->
+
                     %% Ignore the request, and just return a static page response:
                     ResponseHeaders = [ 
                         {<<"url">>, <<"http://localhost:6121/">>}, %% url only needed in push streams usually?

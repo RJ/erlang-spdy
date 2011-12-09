@@ -13,7 +13,7 @@
 
 %% API
 -export([start_link/5, send_data_fin/1, send_data/2, closed/2, received_data/2,
-         send_response/3, received_fin/1
+         send_response/3, received_fin/1, send_frame/2
         ]).
 
 %% gen_server callbacks
@@ -51,6 +51,8 @@ received_fin(Pid) ->
 send_response(Pid, Headers, Body) ->
     gen_server:cast(Pid, {send_response, Headers, Body}).
 
+send_frame(Pid, F) ->
+    gen_server:cast(Pid, {send_frame, F}).
 
 %% gen_server callbacks
 
@@ -69,6 +71,10 @@ init([StreamID, Pid, Headers, Mod, Opts]) ->
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
+
+handle_cast({send_frame, F}, State) ->
+    espdy_session:snd(State#state.pid, State#state.streamid, F),
+    {noreply, State};
 
 handle_cast(received_fin, State = #state{clientclosed=true}) ->
     ?LOG("Got FIN but client has already closed?", []),
@@ -135,14 +141,11 @@ handle_info(init_callback, State) ->
         %% with no need for this process to persist for streaming the body
         %% so we can terminate this process after replying.
         {ok, Headers, Body} when is_list(Headers), is_binary(Body) ->
-            send_http_response(Headers, Body, State),
-            NewState = State#state{serverclosed=true},
-            case both_closed(NewState) of
-                true  -> ?LOG("Both ends closed, stopping stream ~w",[State#state.streamid]),
-                         {stop, normal, NewState};
-                false -> ?LOG("We are closed, client not. stream ~w",[State#state.streamid]),
-                         {noreply, NewState}
-            end;
+            %% se re-send this as a message to ourselves, because the callback
+            %% module may have dispatched other frames (eg, settings) before 
+            %% returning us this response:
+            send_response(self(), Headers, Body),
+            {noreply, State};
         %% The callback module will call msg us the send_http_response
         %% (typically from within the guts of cowboy_http_req, so that
         %%  we can reuse the existing http API)

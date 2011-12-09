@@ -155,7 +155,12 @@ build_frame(#spdy_ping{      version = Version,
 
 build_frame(#spdy_goaway{    version = Version,
                              lastgoodid=LGI}, _Z) ->
-    bcf(Version, ?GOAWAY, 0, << 0:1, LGI:31/big-unsigned-integer >>).
+    bcf(Version, ?GOAWAY, 0, << 0:1, LGI:31/big-unsigned-integer >>);
+
+build_frame(#spdy_settings{  version = Version,
+                             flags = Flags,
+                             settings = Settings }, _Z) ->
+    bcf(Version, ?SETTINGS, Flags, encode_settings(Settings)).
 
 %% TODO not implemented build_frame for all types yet
 
@@ -196,12 +201,26 @@ parse_settings(<<Num:32/big-unsigned-integer, Data/binary>>) ->
     parse_settings_pair(Num, Data, []).
 
 parse_settings_pair(0, _, Acc) -> lists:reverse(Acc);
-parse_settings_pair(Num, <<Flags:8/big-unsigned-integer,
-                        Id:24/big-unsigned-integer,
-                        Value:32/big-unsigned-integer,
-                        Rest/binary>>, Acc) ->
-    Item = {Id, Flags, Value},
+parse_settings_pair(Num, <<Id:24/big-unsigned-integer,
+                           Flags:8/big-unsigned-integer,
+                           Value:32/big-unsigned-integer,
+                           Rest/binary>>, Acc) ->
+    Item = {Id, {Flags, Value}},
     parse_settings_pair(Num-1, Rest, [Item|Acc]).
+
+%% [{key, {flags, val}}..]
+encode_settings(Settings) ->
+    {Num, Bin} = encode_settings(Settings, <<>>, 0),
+    << Num:32/big-unsigned-integer, Bin/binary>>.
+
+encode_settings([], Acc, Num) -> 
+    {Num, Acc};
+encode_settings([{Id,{Flags,Val}}|Rest], Acc, Num) ->
+    Item = << Id:24/big-unsigned-integer, 
+              Flags:8/big-unsigned-integer, 
+              Val:32/big-unsigned-integer >>,
+    encode_settings(Rest, << Acc/binary, Item/binary >>, Num+1).
+
 
 
 unpack(Z, Compressed, Dict) ->

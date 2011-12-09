@@ -19,7 +19,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--export([start_link/3, snd/3]).
+-export([start_link/4, snd/3]).
 
 -compile(export_all). %% debug
 
@@ -29,6 +29,7 @@
     transport :: module(),
     last_client_sid = 0,
     last_server_sid = 0,
+    cbmod, %% callback module for streams
     buffer = <<>> :: binary(),
     goingaway = false :: boolean(),
     z_context_inf,  %% zlib context for inflating
@@ -39,17 +40,16 @@
 
 %% API.
 
-%% @doc Start a SPDY protocol process.
--spec start_link(inet:socket(), module(), any()) -> {ok, pid()}.
-start_link(Socket, Transport, Opts) ->
-    gen_server:start(?MODULE, [Socket, Transport, Opts], []).
+-spec start_link(inet:socket(), gen_tcp | ssl, module(), list()) -> {ok, pid()}.
+start_link(Socket, Transport, CBMod, Opts) ->
+    gen_server:start(?MODULE, [Socket, Transport, CBMod, Opts], []).
 
 snd(Pid, StreamID, Frame) when is_pid(Pid), is_integer(StreamID) ->
     gen_server:cast(Pid, {snd, StreamID, Frame}).
 
 %%
 
-init([Socket, Transport, Opts]) ->
+init([Socket, Transport, CBMod, Opts]) ->
     %% Init zlib context used for headers blocks
     Zinf = zlib:open(),
     ok = zlib:inflateInit(Zinf),
@@ -58,6 +58,7 @@ init([Socket, Transport, Opts]) ->
     %%ok = zlib:deflateInit(Z, best_compression,deflated, 15, 9, default),
     zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT),
     State = #state{ socket=Socket, 
+                    cbmod=CBMod,
                     transport=Transport,
                     z_context_inf=Zinf,
                     z_context_def=Zdef,
@@ -186,7 +187,7 @@ handle_frame(#spdy_syn_stream{  flags=Flags,
            {ok, Pid} = espdy_stream:start_link(StreamID, 
                                                self(), 
                                                Headers, 
-                                               espdy_stream_http,  %% TODO variable
+                                               State#state.cbmod,
                                                State#state.spdy_opts),
             %% TODO pass fin into startlink?
             hasflag(Flags,?DATA_FLAG_FIN) andalso espdy_stream:received_fin(Pid),
@@ -310,10 +311,10 @@ stream_error(Err, #stream{id=Id}, State = #state{}) ->
 
 
 apply_settings(Settings, State = #state{settings=OldSettings}) ->
-    %% TODO persist settings somehow, if flags has perist bit set for a value
-    NewSettings = lists:foldl(fun({Id, Flags, Value}, Acc) ->
+    NewSettings = lists:foldl(fun({Id, {Flags, Value}}, Acc) ->
         [ {Id, {Flags, Value}} | proplists:delete(Id, Acc) ]
     end, OldSettings, Settings),
+    ?LOG("SETTINGS FOR THIS SESSION: ~p",[NewSettings]),
     State#state{settings=NewSettings}.
 %% STATUS CODES used by rst-stream, goaway, etc
 

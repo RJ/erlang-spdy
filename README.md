@@ -20,8 +20,6 @@ Current Status
 The demo serves up a nice hardcoded page, and can handle a SPDY v2 session
 properly to chrome.
 
-It doesn't do SETTINGS yet (keyvals that persist between sessions)
-
 No flow control, although that got pushed into SPDY/3 anyway
 
 Probably some other stuff to mention here.
@@ -49,7 +47,6 @@ Now go to `http://localhost:6121/` in the new Chrome window.
 
 Erlang SPDY Design Notes
 ------------------------
-NB: This is somewhat aspirational, not all of this is wired up yet
 
 This library is useful once you have accepted a socket that will be used for
 the SPDY protocol. Once accepted, you start a `espdy_session` process,
