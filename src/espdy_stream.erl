@@ -13,7 +13,7 @@
 
 %% API
 -export([start_link/5, send_data_fin/1, send_data/2, closed/2, received_data/2,
-         send_response/3, received_fin/1, send_frame/2
+         send_response/3, received_fin/1, send_frame/2, headers_updated/3
         ]).
 
 %% gen_server callbacks
@@ -53,6 +53,9 @@ send_response(Pid, Headers, Body) ->
 
 send_frame(Pid, F) ->
     gen_server:cast(Pid, {send_frame, F}).
+
+headers_updated(Pid, Delta, NewMergedHeaders) ->
+    gen_server:cast(Pid, {headers_updated, Delta, NewMergedHeaders}).
 
 %% gen_server callbacks
 
