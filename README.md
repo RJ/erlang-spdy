@@ -39,6 +39,12 @@ This will open a new chrome window:
 
 Now go to `http://localhost:6121/` in the new Chrome window.
 
+You can view stats on Chrome's SPDY status at chrome://net-internals/#spdy
+**However**, it crashes with --use-spdy=no-ssl unless you have a very recent
+version. I'm testing with stunnel and https, and it works fine when Chrome is
+started with --use-spdy=ssl
+
+
 ### OS X example
     /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --use-spdy=no-ssl --new-window --user-data-dir=/tmp/foo http://localhost:6121/ 
 
