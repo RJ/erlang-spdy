@@ -28,7 +28,7 @@ accept_loop(ListenSock) ->
         {ok, Sock} ->
             case ssl:ssl_accept(Sock) of 
                 ok ->
-                    io:format("Negotationed next protocol: ~p\n",[ssl:negotiated_next_protocol(Sock)]),
+                    io:format("Negotiated next protocol: ~p\n",[ssl:negotiated_next_protocol(Sock)]),
                     Opts = [], %% passed through to the stream callback module
                     {ok, Pid} = espdy_session:start_link(Sock, ssl, espdy_stream_http, Opts),
                     %% You must assign controlling process then send shoot, to notify
