@@ -10,14 +10,29 @@
 test_basic_operation() ->
     ?assertEqual(1, 1).
 
+%%
+%% Control Frame Tests
+%%
 
+%% Control Frame Layout:
+%% +----------------------------------+
+%% |C| Version(15bits) | Type(16bits) |
+%% +----------------------------------+
+%% | Flags (8)  |  Length (24 bits)   |
+%% +----------------------------------+
+%% |               Data               |
+%% +----------------------------------+
+
+% SETTINGS Control Frame Layout (v2):
 % +----------------------------------+
-% |C| Version(15bits) | Type(16bits) |
+% |1|       2          |       4     |
 % +----------------------------------+
 % | Flags (8)  |  Length (24 bits)   |
 % +----------------------------------+
-% |               Data               |
+% |         Number of entries        |
 % +----------------------------------+
+% |          ID/Value Pairs          |
+% |             ...                  |
 control_frame_settings_v2_test() ->
     ControlFrameData = <<1:1,                                     % C
                          2:15/big-unsigned-integer,               % Version
@@ -31,6 +46,24 @@ control_frame_settings_v2_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
+control_frame_settings_v2_raw_test() ->
+    ControlFrameData = <<128,2,0,4,0,0,0,12,0,0,0,1,4,0,0,0,0,0,3,232>>,
+    DesiredControlFrame = #spdy_settings{version=2,
+                                         flags=0,
+                                         settings=[{262144,{0,1000}}]},
+    {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
+    ?assertEqual(DesiredControlFrame, ControlFrame).
+
+% SETTINGS Control Frame Layout (v3):
+% +----------------------------------+
+% |1|   version    |         4       |
+% +----------------------------------+
+% | Flags (8)  |  Length (24 bits)   |
+% +----------------------------------+
+% |         Number of entries        |
+% +----------------------------------+
+% |          ID/Value Pairs          |
+% |             ...                  |
 control_frame_settings_v3_test() ->
     ControlFrameData = <<1:1,                                     % C
                          3:15/big-unsigned-integer,               % Version
@@ -44,15 +77,20 @@ control_frame_settings_v3_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
-
-control_frame_settings_v2_raw_test() ->
-    ControlFrameData = <<128,2,0,4,0,0,0,12,0,0,0,1,4,0,0,0,0,0,3,232>>,
-    DesiredControlFrame = #spdy_settings{version=2,
-                                         flags=0,
-                                         settings=[{262144,{0,1000}}]},
-    {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
-    ?assertEqual(DesiredControlFrame, ControlFrame).
-
+% SYN_STREAM Control Frame Layout (v2):
+% +----------------------------------+
+% |1|       2          |       1     |
+% +----------------------------------+
+% | Flags (8)  |  Length (24 bits)   |
+% +----------------------------------+
+% |X|          Stream-ID (31bits)    |
+% +----------------------------------+
+% |X|Associated-To-Stream-ID (31bits)|
+% +----------------------------------+
+% | Pri | Unused    |                |
+% +------------------                |
+% |     Name/value header block      |
+% |             ...                  |
 control_frame_syn_stream_v2_raw_test() ->
     ControlFrameData = <<128,2,0,1,1,0,1,34,0,0,0,1,0,0,0,0,0,0,56,234,223,
                          162,81,178,98,224,98,96,131,164,23,6,123,184,11,117,
@@ -100,6 +138,29 @@ control_frame_syn_stream_v2_raw_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, Zinf),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
+% SYN_STREAM Control Frame Layout (v3):
+% +------------------------------------+
+% |1|    version    |         1        |
+% +------------------------------------+
+% |  Flags (8)  |  Length (24 bits)    |
+% +------------------------------------+
+% |X|           Stream-ID (31bits)     |
+% +------------------------------------+
+% |X| Associated-To-Stream-ID (31bits) |
+% +------------------------------------+
+% | Pri|Unused | Slot |                |
+% +-------------------+                |
+% | Number of Name/Value pairs (int32) |   <+
+% +------------------------------------+    |
+% |     Length of name (int32)         |    | This section is the "Name/Value
+% +------------------------------------+    | Header Block", and is compressed.
+% |           Name (string)            |    |
+% +------------------------------------+    |
+% |     Length of value  (int32)       |    |
+% +------------------------------------+    |
+% |          Value   (string)          |    |
+% +------------------------------------+    |
+% |           (repeats)                |   <+
 control_frame_syn_stream_v3_test() ->
     RawHeaderData = <<3:32/big-unsigned-integer, % Number of Name/Value Pairs
                       7:32/big-unsigned-integer, % Length of Name (Header 1)
@@ -124,17 +185,18 @@ control_frame_syn_stream_v3_test() ->
     ?LOG("PACKED: ~p",[CompressedHeaderData]),
     ControlFrameData = <<0:1, 9:31/big-unsigned-integer, % Stream ID
                          0:1, 5:31/big-unsigned-integer, % Associated-To-Stream ID
-                         7:3/big-unsigned-integer, 0:5/big-unsigned-integer,  % Priority
+                         7:3/big-unsigned-integer,       % Priority
+                         0:5/big-unsigned-integer,       % Unused
                          0:8/big-unsigned-integer,       % Slot
                          CompressedHeaderData/binary >>, % Compressed Headers
     DataLength = size(ControlFrameData),
     ?LOG("LENGTH: ~p",[DataLength]),
-    RawControlFrame = <<1:1,                                            % C
-                     3:15/big-unsigned-integer,                      % Version
-                     1:16/big-unsigned-integer,                      % Type
-                     1:8/big-unsigned-integer,                       % Flags
+    RawControlFrame = <<1:1,                             % C
+                     3:15/big-unsigned-integer,          % Version
+                     1:16/big-unsigned-integer,          % Type
+                     1:8/big-unsigned-integer,           % Flags
                      DataLength:24/big-unsigned-integer, % Length
-                     ControlFrameData/binary >>,                     % Data
+                     ControlFrameData/binary >>,         % Data
     ?LOG("CONTROL FRAME: ~p",[RawControlFrame]),
 
     DesiredHeaders = [{<<":method">>,<<"GET">>},
@@ -151,6 +213,38 @@ control_frame_syn_stream_v3_test() ->
     ok = zlib:inflateInit(Zinf),
     {ControlFrame, _Z} = espdy_parser:parse_frame(RawControlFrame, Zinf),
     ?assertEqual(DesiredControlFrame, ControlFrame).
+
+% PING Control Frame Layout (v2/v3):
+% +----------------------------------+
+% |1|   version    |         6       |
+% +----------------------------------+
+% | 0 (flags) |     4 (length)       |
+% +----------------------------------|
+% |            32-bit ID             |
+% +----------------------------------+
+control_frame_ping_v2_test() ->
+    ControlFrameData = <<1:1,                              % C
+                         2:15/big-unsigned-integer,        % Version
+                         6:16/big-unsigned-integer,        % Type
+                         0:8/big-unsigned-integer,         % Flags
+                         4:24/big-unsigned-integer,        % Length (fixed)
+                         12345:32/big-unsigned-integer >>, % ID
+    DesiredControlFrame = #spdy_ping{version=2, id=12345},
+    {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
+    ?assertEqual(DesiredControlFrame, ControlFrame).
+
+control_frame_ping_v3_test() ->
+    ControlFrameData = <<1:1,                              % C
+                         3:15/big-unsigned-integer,        % Version
+                         6:16/big-unsigned-integer,        % Type
+                         0:8/big-unsigned-integer,         % Flags
+                         4:24/big-unsigned-integer,        % Length (fixed)
+                         12345:32/big-unsigned-integer >>, % ID
+    DesiredControlFrame = #spdy_ping{version=3, id=12345},
+    {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
+    ?assertEqual(DesiredControlFrame, ControlFrame).
+
+%% Header encoding tests
 
 encode_name_value_header_v2_test() ->
     Headers = [{<<"method">>,<<"GET">>},
