@@ -51,10 +51,10 @@ parse_frame(_Buffer, _Z) ->
 parse_control_frame(V=2, ?SYN_STREAM, Flags, _Length,
                     << _:1, StreamID:31/big-unsigned-integer,
                        _:1, AssocStreamID:31/big-unsigned-integer,
-                       Priority:2/big-unsigned-integer, %% size is 3 in v3
+                       Priority:2/big-unsigned-integer,
                        _Unused:14/binary-unit:1, %% size is 12 in v3
                        NVPairsData/binary >>, Z) ->
-    Headers = parse_name_val_pairs(NVPairsData, Z),
+    Headers = parse_name_val_header(V, NVPairsData, Z),
     #spdy_syn_stream{version=V,
                      flags=Flags,
                      streamid=StreamID,
@@ -62,10 +62,26 @@ parse_control_frame(V=2, ?SYN_STREAM, Flags, _Length,
                      priority=Priority,
                      headers=Headers};
 
-parse_control_frame(V=2, ?SYN_REPLY, Flags, _Length,
+parse_control_frame(V=3, ?SYN_STREAM, Flags, _Length,
                     << _:1, StreamID:31/big-unsigned-integer,
+                       _:1, AssocStreamID:31/big-unsigned-integer,
+                       Priority:3/big-unsigned-integer,
+                       _Unused:5/binary-unit:1,
+                       Slot:8/big-unsigned-integer,
                        NVPairsData/binary >>, Z) ->
-    Headers = parse_name_val_pairs(NVPairsData, Z),
+    Headers = parse_name_val_header(V, NVPairsData, Z),
+    #spdy_syn_stream{version=V,
+                     flags=Flags,
+                     streamid=StreamID,
+                     associd=AssocStreamID,
+                     priority=Priority,
+                     slot=Slot,
+                     headers=Headers};
+
+parse_control_frame(V, ?SYN_REPLY, Flags, _Length,
+                    << _:1, StreamID:31/big-unsigned-integer,
+                       NVPairsData/binary >>, Z) when V =:= 2; V =:= 3 ->
+    Headers = parse_name_val_header(V, NVPairsData, Z),
     #spdy_syn_reply{version=V,
                     flags=Flags,
                     streamid=StreamID,
@@ -79,7 +95,7 @@ parse_control_frame(V=2, ?RST_STREAM, Flags, _Length,
                      streamid=StreamID,
                      statuscode=StatusCode};
 
-parse_control_frame(V=2, ?SETTINGS, Flags, _Length, Data, _Z) ->
+parse_control_frame(V, ?SETTINGS, Flags, _Length, Data, _Z) when V =:= 2; V =:= 3 ->
     #spdy_settings{ version=V,
                     flags=Flags,
                     settings=parse_settings(Data)};
@@ -99,7 +115,7 @@ parse_control_frame(V=2, ?HEADERS, Flags, _Length,
                      << _:1, StreamID:31/big-unsigned-integer,
                         _Unused:16/binary, %% not in v3?
                         NVPairsData/binary >>, Z) ->
-    Headers = parse_name_val_pairs(NVPairsData, Z),
+    Headers = parse_name_val_header(V, NVPairsData, Z),
     #spdy_headers{version=V,
                   flags=Flags,
                   streamid=StreamID,
@@ -126,7 +142,7 @@ build_frame(#spdy_syn_stream{version = Version,
                              associd=AssocID,
                              priority=Priority,
                              headers=Headers}, Z) ->
-    NVData = encode_name_value_pairs(Headers, Z),
+    NVData = encode_name_value_header(Version, Headers, Z),
     bcf(Version, ?SYN_STREAM, Flags, << 0:1, StreamID:31/big-unsigned-integer,
                                         0:1, AssocID:31/big-unsigned-integer,
                                         Priority:2/big-unsigned-integer, %% size is 3 in v3
@@ -137,7 +153,7 @@ build_frame(#spdy_syn_reply{ version = Version,
                              flags=Flags,
                              streamid=StreamID,
                              headers=Headers}, Z) ->
-    NVData = encode_name_value_pairs(Headers, Z),
+    NVData = encode_name_value_header(Version, Headers, Z),
     bcf(Version, ?SYN_REPLY, Flags, << 0:1, StreamID:31/big-unsigned-integer,
                                        0:16/unit:1, %% UNUSED
                                        NVData/binary >>);
@@ -178,23 +194,41 @@ bcf(Version, Type, Flags, Data) ->
     >>.
 
 %% 2.6.9 Name/Value Header Block
-parse_name_val_pairs(Bin, Z) ->
+parse_name_val_header(Version = 2, Bin, Z) ->
     ?LOG("Inflating with Z=~p",[Z]),
     Unpacked = unpack(Z, Bin, ?HEADERS_ZLIB_DICT),
 %%    zlib:inflateReset(Z),
     <<Num:16/big-unsigned-integer, Rest/binary>> = Unpacked,
-    parse_name_val_pairs(Num, Rest, []).
+    parse_name_val_pairs(Version, Num, Rest, []);
 
-parse_name_val_pairs(0, _, Acc) -> 
+parse_name_val_header(Version = 3, Bin, Z) ->
+    ?LOG("Inflating v3 with Z=~p",[Z]),
+    ?LOG("ABOUT TO UNPACK: ~p", [Bin]),
+    Unpacked = unpack(Z, Bin, ?HEADERS_ZLIB_DICT_V3),
+    ?LOG("UNPACKED: ~p", [Unpacked]),
+    <<Num:32/big-unsigned-integer, Rest/binary>> = Unpacked,
+    ?LOG("NUM PAIRS: ~p", [Num]),
+    parse_name_val_pairs(Version, Num, Rest, []).
+
+parse_name_val_pairs(_V, 0, _, Acc) ->
     lists:reverse(Acc);
-parse_name_val_pairs(Num, << NameLen:16/big-unsigned-integer,
-                    Name:NameLen/binary,
-                    ValLen:16/big-unsigned-integer,
-                    Val:ValLen/binary,
-                    Rest/binary >>, Acc) ->
+parse_name_val_pairs(Version = 2, Num, << NameLen:16/big-unsigned-integer,
+                     Name:NameLen/binary,
+                     ValLen:16/big-unsigned-integer,
+                     Val:ValLen/binary,
+                     Rest/binary >>, Acc) ->
     %% TODO validate and throw errors as per 2.6.9
     Pair = {Name, Val},
-    parse_name_val_pairs(Num-1, Rest, [Pair | Acc]).
+    parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
+parse_name_val_pairs(Version = 3, Num, << NameLen:32/big-unsigned-integer,
+                     Name:NameLen/binary,
+                     ValLen:32/big-unsigned-integer,
+                     Val:ValLen/binary,
+                     Rest/binary >>, Acc) ->
+    %% TODO validate and throw errors as per 2.6.9
+    Pair = {Name, Val},
+    parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]).
+
 %% END nvpair stuff
 
 parse_settings(<<Num:32/big-unsigned-integer, Data/binary>>) ->
@@ -237,7 +271,7 @@ unpack(Z, Compressed, Dict) ->
      end.
 
 %% Encode the name/value compressed header block
-encode_name_value_pairs(Headers, Z) when is_list(Headers) ->
+encode_name_value_header(_Version = 2, Headers, Z) when is_list(Headers) ->
     Num = length(Headers),
     L = lists:foldl(fun({K,V}, Acc) ->
         Klen = size(K),
@@ -245,13 +279,25 @@ encode_name_value_pairs(Headers, Z) when is_list(Headers) ->
         [ <<Klen:16/unsigned-big-integer, K/binary, Vlen:16/unsigned-big-integer, V/binary>> | Acc ]
     end, [<< Num:16/unsigned-big-integer >>], Headers),
     ToDeflate = iolist_to_binary(lists:reverse(L)),
-    %%io:format("TO DEFLATE: ~p\n",[ToDeflate]),
     Deflated = iolist_to_binary([ 
             zlib:deflate(Z, ToDeflate, full)
         ]),
     %%io:format("deflated: ~p\n",[Deflated]),
- %%   zlib:close(Z),
+    %%zlib:close(Z),
+    Deflated;
+encode_name_value_header(_Version = 3, Headers, Z) when is_list(Headers) ->
+    Num = length(Headers),
+    L = lists:foldl(fun({K,V}, Acc) ->
+        Klen = size(K),
+        Vlen = size(V),
+        [ <<Klen:32/unsigned-big-integer, K/binary, Vlen:32/unsigned-big-integer, V/binary>> | Acc ]
+    end, [<< Num:32/unsigned-big-integer >>], Headers),
+    ToDeflate = iolist_to_binary(lists:reverse(L)),
+    Deflated = iolist_to_binary([
+            zlib:deflate(Z, ToDeflate, full)
+        ]),
     Deflated.
+
 
  %% Various conversions for nicer debugging and matching:
 atom_to_status_code(protocol_error)         -> 1;

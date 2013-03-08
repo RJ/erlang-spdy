@@ -29,7 +29,21 @@ control_frame_settings_v2_test() ->
                                          flags=2,
                                          settings=[{4, {1, 100}}]},
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
-    ?assertEqual(ControlFrame, DesiredControlFrame).
+    ?assertEqual(DesiredControlFrame, ControlFrame).
+
+control_frame_settings_v3_test() ->
+    ControlFrameData = <<1:1,                                     % C
+                         3:15/big-unsigned-integer,               % Version
+                         4:16/big-unsigned-integer,               % Type
+                         2:8/big-unsigned-integer,                % Flags
+                         12:24/big-unsigned-integer,              % Length size(Data)
+                         <<0,0,0,1,0,0,4,1,0,0,0,100>>/binary >>, % Data
+    DesiredControlFrame = #spdy_settings{version=3,
+                                         flags=2,
+                                         settings=[{4, {1, 100}}]},
+    {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
+    ?assertEqual(DesiredControlFrame, ControlFrame).
+
 
 control_frame_settings_v2_raw_test() ->
     ControlFrameData = <<128,2,0,4,0,0,0,12,0,0,0,1,4,0,0,0,0,0,3,232>>,
@@ -79,8 +93,88 @@ control_frame_syn_stream_v2_raw_test() ->
                                            streamid=1,
                                            associd=0,
                                            priority=0,
+                                           slot=undefined,
                                            headers=DesiredHeaders},
     Zinf = zlib:open(),
     ok = zlib:inflateInit(Zinf),
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, Zinf),
     ?assertEqual(DesiredControlFrame, ControlFrame).
+
+control_frame_syn_stream_v3_test() ->
+    RawHeaderData = <<3:32/big-unsigned-integer, % Number of Name/Value Pairs
+                      7:32/big-unsigned-integer, % Length of Name (Header 1)
+                      <<":method">>/binary,      % Name
+                      3:32/big-unsigned-integer, % Length of Value
+                      <<"GET">>/binary,          % Value
+                      5:32/big-unsigned-integer, % Length of Name (Header 2)
+                      <<":path">>/binary,        % Name
+                      12:32/big-unsigned-integer,% Length of Value
+                      <<"/hello_world">>/binary, % Value
+                      8:32/big-unsigned-integer, % Length of Name (Header 3)
+                      <<":version">>/binary,     % Name
+                      8:32/big-unsigned-integer, % Length of Value
+                      <<"HTTP/1.1">>/binary >>,  % Value
+    Zdef = zlib:open(),
+    ok = zlib:deflateInit(Zdef),
+    zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT_V3),
+    CompressedHeaderData = iolist_to_binary([
+                zlib:deflate(Zdef, RawHeaderData, full)
+            ]),
+
+    ?LOG("PACKED: ~p",[CompressedHeaderData]),
+    ControlFrameData = <<0:1, 9:31/big-unsigned-integer, % Stream ID
+                         0:1, 5:31/big-unsigned-integer, % Associated-To-Stream ID
+                         7:3/big-unsigned-integer, 0:5/big-unsigned-integer,  % Priority
+                         0:8/big-unsigned-integer,       % Slot
+                         CompressedHeaderData/binary >>, % Compressed Headers
+    DataLength = size(ControlFrameData),
+    ?LOG("LENGTH: ~p",[DataLength]),
+    RawControlFrame = <<1:1,                                            % C
+                     3:15/big-unsigned-integer,                      % Version
+                     1:16/big-unsigned-integer,                      % Type
+                     1:8/big-unsigned-integer,                       % Flags
+                     DataLength:24/big-unsigned-integer, % Length
+                     ControlFrameData/binary >>,                     % Data
+    ?LOG("CONTROL FRAME: ~p",[RawControlFrame]),
+
+    DesiredHeaders = [{<<":method">>,<<"GET">>},
+                      {<<":path">>,<<"/hello_world">>},
+                      {<<":version">>,<<"HTTP/1.1">>}],
+    DesiredControlFrame = #spdy_syn_stream{version=3,
+                                           flags=1,
+                                           streamid=9,
+                                           associd=5,
+                                           priority=7,
+                                           slot=0,
+                                           headers=DesiredHeaders},
+    Zinf = zlib:open(),
+    ok = zlib:inflateInit(Zinf),
+    {ControlFrame, _Z} = espdy_parser:parse_frame(RawControlFrame, Zinf),
+    ?assertEqual(DesiredControlFrame, ControlFrame).
+
+encode_name_value_header_v2_test() ->
+    Headers = [{<<"method">>,<<"GET">>},
+               {<<"url">>,<<"/">>},
+               {<<"version">>,<<"HTTP/1.1">>}],
+    Desired = <<120,187,223,162,81,178,98,96,102,96,203,5,230,195,252,20,6,102,119,
+                215,16,6,102,144,32,163,62,3,59,84,13,3,7,76,43,0,0,0,255,255>>,
+
+    Zdef = zlib:open(),
+    ok = zlib:deflateInit(Zdef),
+    zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT),
+    Packed = espdy_parser:encode_name_value_header(2, Headers, Zdef),
+    ?assertEqual(Desired, Packed).
+
+encode_name_value_header_v3_test() ->
+    Headers = [{<<":method">>,<<"GET">>},
+               {<<":path">>,<<"/hello_world">>},
+               {<<":version">>,<<"HTTP/1.1">>}],
+    Desired = <<120,187,227,198,167,194,2,37,58,80,122,180,66,164,90,
+                119,215,16,80,6,179,42,72,4,151,77,60,250,25,169,192,
+                2,50,190,60,191,40,7,156,153,173,176,164,93,0,0,0,0,255,255>>,
+
+    Zdef = zlib:open(),
+    ok = zlib:deflateInit(Zdef),
+    zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT_V3),
+    Packed = espdy_parser:encode_name_value_header(3, Headers, Zdef),
+    ?assertEqual(Desired, Packed).
