@@ -16,7 +16,7 @@
 %% +----------------------------------+
 parse_frame(<<  0:1, %% control bit clear = data
                 StreamID:31/big-unsigned-integer,
-                Flags:8/big-unsigned-integer, 
+                Flags:8/big-unsigned-integer,
                 Length:24/big-unsigned-integer,
                 Data:Length/binary-unit:8,
                 Rest/binary
@@ -34,9 +34,9 @@ parse_frame(<<  0:1, %% control bit clear = data
 %% |               Data               |
 %% +----------------------------------+
 parse_frame(<<  1:1, %% control bit
-                Version:15/big-unsigned-integer, 
-                Type:16/big-unsigned-integer, 
-                Flags:8/big-unsigned-integer, 
+                Version:15/big-unsigned-integer,
+                Type:16/big-unsigned-integer,
+                Flags:8/big-unsigned-integer,
                 Length:24/big-unsigned-integer,
                 Data:Length/binary-unit:8,
                 Rest/binary
@@ -46,16 +46,16 @@ parse_frame(<<  1:1, %% control bit
 
 %% No full frame found:
 parse_frame(_Buffer, _Z) ->
-    undefined. 
+    undefined.
 
-parse_control_frame(V=2, ?SYN_STREAM, Flags, _Length, 
+parse_control_frame(V=2, ?SYN_STREAM, Flags, _Length,
                     << _:1, StreamID:31/big-unsigned-integer,
                        _:1, AssocStreamID:31/big-unsigned-integer,
                        Priority:2/big-unsigned-integer, %% size is 3 in v3
                        _Unused:14/binary-unit:1, %% size is 12 in v3
                        NVPairsData/binary >>, Z) ->
     Headers = parse_name_val_pairs(NVPairsData, Z),
-    #spdy_syn_stream{version = V, 
+    #spdy_syn_stream{version=V,
                      flags=Flags,
                      streamid=StreamID,
                      associd=AssocStreamID,
@@ -120,7 +120,7 @@ build_frame(#spdy_data{streamid=StreamID,
        Data/binary
     >>;   
 
-build_frame(#spdy_syn_stream{version = Version, 
+build_frame(#spdy_syn_stream{version = Version,
                              flags=Flags,
                              streamid=StreamID,
                              associd=AssocID,
@@ -133,7 +133,7 @@ build_frame(#spdy_syn_stream{version = Version,
                                         0:14/unit:1, %% size is 12 in v3 (UNUSED)
                                         NVData/binary >>);
 
-build_frame(#spdy_syn_reply{ version = Version, 
+build_frame(#spdy_syn_reply{ version = Version,
                              flags=Flags,
                              streamid=StreamID,
                              headers=Headers}, Z) ->
@@ -170,9 +170,9 @@ bcf(undefined, T,F,D) -> bcf(2,T,F,D);
 bcf(Version, Type, Flags, Data) ->
     Length = size(Data),
     << 1:1,
-       Version:15/big-unsigned-integer, 
-       Type:16/big-unsigned-integer, 
-       Flags:8/big-unsigned-integer, 
+       Version:15/big-unsigned-integer,
+       Type:16/big-unsigned-integer,
+       Flags:8/big-unsigned-integer,
        Length:24/big-unsigned-integer,
        Data/binary
     >>.
