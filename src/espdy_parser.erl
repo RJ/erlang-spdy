@@ -87,9 +87,9 @@ parse_control_frame(V, ?SYN_REPLY, Flags, _Length,
                     streamid=StreamID,
                     headers=Headers}; 
 
-parse_control_frame(V=2, ?RST_STREAM, Flags, _Length,
+parse_control_frame(V, ?RST_STREAM, Flags, _Length,
                     <<  _:1, StreamID:31/big-unsigned-integer,
-                       StatusCode:32/big-unsigned-integer >>, _Z) ->
+                       StatusCode:32/big-unsigned-integer >>, _Z) when V =:= 2; V =:= 3 ->
     #spdy_rst_stream{version=V,
                      flags=Flags,
                      streamid=StreamID,
@@ -103,7 +103,7 @@ parse_control_frame(V, ?SETTINGS, Flags, _Length, Data, _Z) when V =:= 2; V =:= 
 parse_control_frame(V=2, ?NOOP, _Flags, 0, _Data, _Z) ->
     #spdy_noop{ version=V };
 
-parse_control_frame(V=2, ?PING, _Flags, 4, << PingID:32/big-unsigned-integer >>, _Z) ->
+parse_control_frame(V, ?PING, _Flags, 4, << PingID:32/big-unsigned-integer >>, _Z) when V =:= 2; V =:= 3 ->
     #spdy_ping{ version=V, id=PingID };
 
 %% in v3: , StatusCode:32/big-unsigned-integer >>
