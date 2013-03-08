@@ -100,6 +100,7 @@ parse_control_frame(V, ?SETTINGS, Flags, _Length, Data, _Z) when V =:= 2; V =:= 
                     flags=Flags,
                     settings=parse_settings(Data)};
 
+% NOOP frame was removed in v3
 parse_control_frame(V=2, ?NOOP, _Flags, 0, _Data, _Z) ->
     #spdy_noop{ version=V };
 
