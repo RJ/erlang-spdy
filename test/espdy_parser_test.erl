@@ -244,7 +244,49 @@ control_frame_ping_v3_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
+% RST_STREAM Control Frame Layout (v2/v3):
+% +----------------------------------+
+% |1|   version    |         3       |
+% +----------------------------------+
+% | Flags (8)  |         8           |
+% +----------------------------------+
+% |X|          Stream-ID (31bits)    |
+% +----------------------------------+
+% |          Status code             |
+% +----------------------------------+
+control_frame_rst_stream_v2_test() ->
+    ControlFrameData = <<1:1,                              % C
+                         2:15/big-unsigned-integer,        % Version
+                         3:16/big-unsigned-integer,        % Type
+                         0:8/big-unsigned-integer,         % Flags
+                         8:24/big-unsigned-integer,        % Length (fixed)
+                         0:1, 543:31/big-unsigned-integer, % Stream-ID
+                         11:32/big-unsigned-integer >>,    % Status code
+    DesiredControlFrame = #spdy_rst_stream{version=2,
+                                           flags=0,
+                                           streamid=543,
+                                           statuscode=11},
+    {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
+    ?assertEqual(DesiredControlFrame, ControlFrame).
+
+control_frame_rst_stream_v3_test() ->
+    ControlFrameData = <<1:1,                              % C
+                         3:15/big-unsigned-integer,        % Version
+                         3:16/big-unsigned-integer,        % Type
+                         0:8/big-unsigned-integer,         % Flags
+                         8:24/big-unsigned-integer,        % Length (fixed)
+                         0:1, 543:31/big-unsigned-integer, % Stream-ID
+                         11:32/big-unsigned-integer >>,    % Status code
+    DesiredControlFrame = #spdy_rst_stream{version=3,
+                                           flags=0,
+                                           streamid=543,
+                                           statuscode=11},
+    {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
+    ?assertEqual(DesiredControlFrame, ControlFrame).
+
+%%
 %% Header encoding tests
+%%
 
 encode_name_value_header_v2_test() ->
     Headers = [{<<"method">>,<<"GET">>},
