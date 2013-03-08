@@ -106,10 +106,15 @@ parse_control_frame(V=2, ?NOOP, _Flags, 0, _Data, _Z) ->
 parse_control_frame(V, ?PING, _Flags, 4, << PingID:32/big-unsigned-integer >>, _Z) when V =:= 2; V =:= 3 ->
     #spdy_ping{ version=V, id=PingID };
 
-%% in v3: , StatusCode:32/big-unsigned-integer >>
-parse_control_frame(V=2, ?GOAWAY, _Flags, 4,  
+parse_control_frame(V=2, ?GOAWAY, _Flags, 4,
                     << _:1, LastGoodStreamID:31/big-unsigned-integer >>, _Z) ->
     #spdy_goaway{version=V, lastgoodid=LastGoodStreamID};
+
+parse_control_frame(V=3, ?GOAWAY, _Flags, 8,
+                    << _:1,
+                      LastGoodStreamID:31/big-unsigned-integer,
+                      StatusCode:32/big-unsigned-integer >>, _Z) ->
+    #spdy_goaway{version=V, lastgoodid=LastGoodStreamID, statuscode = StatusCode};
 
 parse_control_frame(V=2, ?HEADERS, Flags, _Length,
                      << _:1, StreamID:31/big-unsigned-integer,

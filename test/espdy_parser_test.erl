@@ -284,6 +284,50 @@ control_frame_rst_stream_v3_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
+% GOAWAY Control Frame Layout (v2):
+% +----------------------------------+
+% |1|       2          |       7     |
+% +----------------------------------+
+% | 0 (flags) |     4 (length)       |
+% +----------------------------------|
+% |X|  Last-good-stream-ID (31 bits) |
+% +----------------------------------+
+control_frame_goaway_v2_test() ->
+    ControlFrameData = <<1:1,                                 % C
+                         2:15/big-unsigned-integer,           % Version
+                         7:16/big-unsigned-integer,           % Type
+                         0:8/big-unsigned-integer,            % Flags
+                         4:24/big-unsigned-integer,           % Length (fixed)
+                         0:1, 543:31/big-unsigned-integer >>, % Last-good-stream-ID
+    DesiredControlFrame = #spdy_goaway{version=2,
+                                       lastgoodid=543},
+    {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
+    ?assertEqual(DesiredControlFrame, ControlFrame).
+
+% GOAWWAY Control Frame Layout (v3):
+% +----------------------------------+
+% |1|   version    |         7       |
+% +----------------------------------+
+% | 0 (flags) |     8 (length)       |
+% +----------------------------------|
+% |X|  Last-good-stream-ID (31 bits) |
+% +----------------------------------+
+% |          Status code             |
+% +----------------------------------+
+control_frame_goaway_v3_test() ->
+    ControlFrameData = <<1:1,                              % C
+                         3:15/big-unsigned-integer,        % Version
+                         7:16/big-unsigned-integer,        % Type
+                         0:8/big-unsigned-integer,         % Flags
+                         8:24/big-unsigned-integer,        % Length (fixed)
+                         0:1, 543:31/big-unsigned-integer, % Last-good-stream-ID
+                         2:32/big-unsigned-integer >>,     % Status code
+    DesiredControlFrame = #spdy_goaway{version=3,
+                                       lastgoodid=543,
+                                       statuscode=2},
+    {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
+    ?assertEqual(DesiredControlFrame, ControlFrame).
+
 %%
 %% Header encoding tests
 %%
