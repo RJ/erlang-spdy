@@ -42,15 +42,16 @@
     version = 2 :: integer()
 }).
 -record(spdy_ping, {
-    version = 2 :: integer(), 
+    version = 2 :: integer(),
     id          :: integer()
 }).
 -record(spdy_goaway, {
-    version = 2 :: integer(), 
-    lastgoodid  :: integer()
+    version = 2 :: integer(),
+    lastgoodid  :: integer(),
+    statuscode  :: integer()
 }).
 -record(spdy_headers, {
-    version = 2 :: integer(), 
+    version = 2 :: integer(),
     flags = 0   :: integer(),
     streamid    :: integer(),
     headers     :: list()
