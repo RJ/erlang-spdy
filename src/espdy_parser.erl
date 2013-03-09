@@ -121,14 +121,22 @@ parse_control_frame(V=2, ?HEADERS, Flags, _Length,
                      << _:1, StreamID:31/big-unsigned-integer,
                         _Unused:16/big-unsigned-integer,
                         NVPairsData/binary >>, Z) ->
-    Headers = parse_name_val_header(V, NVPairsData, Z),
-    #spdy_headers{version=V,
-                  flags=Flags,
-                  streamid=StreamID,
-                  headers=Headers};
+    parse_headers_frame(V, Flags, StreamID, NVPairsData, Z);
+
+parse_control_frame(V=3, ?HEADERS, Flags, _Length,
+                     << _:1, StreamID:31/big-unsigned-integer,
+                        NVPairsData/binary >>, Z) ->
+    parse_headers_frame(V, Flags, StreamID, NVPairsData, Z);
 
 parse_control_frame(_V, _Type, _Flags, _Len, _Data, _Z) ->
     undefined.
+
+parse_headers_frame(Version, Flags, StreamID, NVPairsData, Z) ->
+    Headers = parse_name_val_header(Version, NVPairsData, Z),
+    #spdy_headers{version=Version,
+                  flags=Flags,
+                  streamid=StreamID,
+                  headers=Headers}.
 
 %% Marshal frame back into binary for transmission
 

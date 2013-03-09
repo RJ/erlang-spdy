@@ -359,6 +359,45 @@ control_frame_headers_v2_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, new_zlib_context_inflate()),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
+% HEADERS Control Frame Layout (v3):
+% +------------------------------------+
+% |1|   version     |          8       |
+% +------------------------------------+
+% | Flags (8)  |   Length (24 bits)    |
+% +------------------------------------+
+% |X|          Stream-ID (31bits)      |
+% +------------------------------------+
+% | Number of Name/Value pairs (int32) |   <+
+% +------------------------------------+    |
+% |     Length of name (int32)         |    | This section is the "Name/Value
+% +------------------------------------+    | Header Block", and is compressed.
+% |           Name (string)            |    |
+% +------------------------------------+    |
+% |     Length of value  (int32)       |    |
+% +------------------------------------+    |
+% |          Value   (string)          |    |
+% +------------------------------------+    |
+% |           (repeats)                |   <+
+control_frame_headers_v3_test() ->
+    Headers = [{<<":method">>,<<"GET">>},
+               {<<":path">>,<<"/hello_world">>},
+               {<<":version">>,<<"HTTP/1.1">>}],
+    Packed = pack_headers(3, Headers),
+    ControlFrameData = <<1:1,                                      % C
+                         3:15/big-unsigned-integer,                % Version
+                         8:16/big-unsigned-integer,                % Type
+                         1:8/big-unsigned-integer,                 % Flags
+                         (size(Packed)+4):24/big-unsigned-integer, % Length
+                         0:1, 432:31/big-unsigned-integer,         % Stream-ID
+                         Packed/binary >>,                         % Name/value header block
+    DesiredControlFrame = #spdy_headers{version=3,
+                                        flags=1,
+                                        streamid=432,
+                                        headers=Headers},
+    {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, new_zlib_context_inflate()),
+    ?assertEqual(DesiredControlFrame, ControlFrame).
+
+
 %%
 %% Header encoding tests
 %%
