@@ -133,8 +133,7 @@ control_frame_syn_stream_v2_raw_test() ->
                                            priority=0,
                                            slot=undefined,
                                            headers=DesiredHeaders},
-    Zinf = zlib:open(),
-    ok = zlib:inflateInit(Zinf),
+    Zinf = new_zlib_context_inflate(),
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, Zinf),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
@@ -328,10 +327,41 @@ control_frame_goaway_v3_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
+% HEADERS Control Frame Layout (v2):
+% +----------------------------------+
+% |C|     2           |      8       |
+% +----------------------------------+
+% | Flags (8)  |  Length (24 bits)   |
+% +----------------------------------+
+% |X|          Stream-ID (31bits)    |
+% +----------------------------------+
+% |  Unused (16 bits) |              |
+% |--------------------              |
+% | Name/value header block          |
+% +----------------------------------+
+control_frame_headers_v2_test() ->
+    Headers = [{<<"method">>,<<"GET">>},
+               {<<"url">>,<<"/">>},
+               {<<"version">>,<<"HTTP/1.1">>}],
+    Packed = pack_headers(2, Headers),
+    ControlFrameData = <<1:1,                                      % C
+                         2:15/big-unsigned-integer,                % Version
+                         8:16/big-unsigned-integer,                % Type
+                         1:8/big-unsigned-integer,                 % Flags
+                         (size(Packed)+6):24/big-unsigned-integer, % Length
+                         0:1, 432:31/big-unsigned-integer,         % Stream-ID
+                         0:16/big-unsigned-integer,                % Unused
+                         Packed/binary >>,                         % Name/value header block
+    DesiredControlFrame = #spdy_headers{version=2,
+                                        flags=1,
+                                        streamid=432,
+                                        headers=Headers},
+    {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, new_zlib_context_inflate()),
+    ?assertEqual(DesiredControlFrame, ControlFrame).
+
 %%
 %% Header encoding tests
 %%
-
 encode_name_value_header_v2_test() ->
     Headers = [{<<"method">>,<<"GET">>},
                {<<"url">>,<<"/">>},
@@ -339,10 +369,7 @@ encode_name_value_header_v2_test() ->
     Desired = <<120,187,223,162,81,178,98,96,102,96,203,5,230,195,252,20,6,102,119,
                 215,16,6,102,144,32,163,62,3,59,84,13,3,7,76,43,0,0,0,255,255>>,
 
-    Zdef = zlib:open(),
-    ok = zlib:deflateInit(Zdef),
-    zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT),
-    Packed = espdy_parser:encode_name_value_header(2, Headers, Zdef),
+    Packed = pack_headers(2, Headers),
     ?assertEqual(Desired, Packed).
 
 encode_name_value_header_v3_test() ->
@@ -353,8 +380,27 @@ encode_name_value_header_v3_test() ->
                 119,215,16,80,6,179,42,72,4,151,77,60,250,25,169,192,
                 2,50,190,60,191,40,7,156,153,173,176,164,93,0,0,0,0,255,255>>,
 
+    Packed = pack_headers(3, Headers),
+    ?assertEqual(Desired, Packed).
+
+%%
+%% Helpers
+%%
+
+pack_headers(Version, Headers) when Version =:= 2; Version =:= 3 ->
+    Zdef = new_zlib_context_deflate(Version),
+    espdy_parser:encode_name_value_header(Version, Headers, Zdef).
+
+new_zlib_context_deflate(V) ->
     Zdef = zlib:open(),
     ok = zlib:deflateInit(Zdef),
-    zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT_V3),
-    Packed = espdy_parser:encode_name_value_header(3, Headers, Zdef),
-    ?assertEqual(Desired, Packed).
+    case V of
+        2 -> zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT);
+        3 -> zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT_V3)
+    end,
+    Zdef.
+
+new_zlib_context_inflate() ->
+    Zinf = zlib:open(),
+    ok = zlib:inflateInit(Zinf),
+    Zinf.

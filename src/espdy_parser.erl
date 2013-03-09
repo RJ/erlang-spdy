@@ -52,7 +52,7 @@ parse_control_frame(V=2, ?SYN_STREAM, Flags, _Length,
                     << _:1, StreamID:31/big-unsigned-integer,
                        _:1, AssocStreamID:31/big-unsigned-integer,
                        Priority:2/big-unsigned-integer,
-                       _Unused:14/binary-unit:1, %% size is 12 in v3
+                       _Unused:14/binary-unit:1,
                        NVPairsData/binary >>, Z) ->
     Headers = parse_name_val_header(V, NVPairsData, Z),
     #spdy_syn_stream{version=V,
@@ -119,7 +119,7 @@ parse_control_frame(V=3, ?GOAWAY, _Flags, 8,
 
 parse_control_frame(V=2, ?HEADERS, Flags, _Length,
                      << _:1, StreamID:31/big-unsigned-integer,
-                        _Unused:16/binary, %% not in v3?
+                        _Unused:16/big-unsigned-integer,
                         NVPairsData/binary >>, Z) ->
     Headers = parse_name_val_header(V, NVPairsData, Z),
     #spdy_headers{version=V,
@@ -164,14 +164,14 @@ build_frame(#spdy_syn_reply{ version = Version,
                                        0:16/unit:1, %% UNUSED
                                        NVData/binary >>);
 
-build_frame(#spdy_rst_stream{version = Version, 
+build_frame(#spdy_rst_stream{version = Version,
                              flags=Flags,
                              streamid=StreamID,
                              statuscode=StatusCode}, _Z) ->
     bcf(Version, ?RST_STREAM, Flags, << 0:1, StreamID:31/big-unsigned-integer,
                                         StatusCode:32/big-unsigned-integer >>);
 
-build_frame(#spdy_ping{      version = Version, 
+build_frame(#spdy_ping{      version = Version,
                              id=PingID}, _Z) ->
     bcf(Version, ?PING, 0, << PingID:32/big-unsigned-integer >>);
 
@@ -264,7 +264,6 @@ encode_settings([{Id,{Flags,Val}}|Rest], Acc, Num) ->
 
 
 unpack(Z, Compressed, Dict) ->
-    ?LOG("UNPACK: ~p",[Compressed]),
     case catch zlib:inflate(Z, Compressed) of
          {'EXIT',{{need_dictionary,_DictID},_}} ->
                  zlib:inflateSetDictionary(Z, Dict),
