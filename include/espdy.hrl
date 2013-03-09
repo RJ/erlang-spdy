@@ -56,6 +56,11 @@
     streamid    :: integer(),
     headers     :: list()
 }).
+-record(spdy_window_update, {
+    version = 3 :: integer(),
+    streamid    :: integer(),
+    delta_size  :: integer()
+}).
 
 %% STREAMS
 -record(stream, {

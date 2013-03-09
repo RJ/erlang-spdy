@@ -397,6 +397,30 @@ control_frame_headers_v3_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, new_zlib_context_inflate()),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
+% WINDOW_UPDATE Control Frame Layout (v3):
+% +----------------------------------+
+% |1|   version    |         9       |
+% +----------------------------------+
+% | 0 (flags) |     8 (length)       |
+% +----------------------------------+
+% |X|     Stream-ID (31-bits)        |
+% +----------------------------------+
+% |X|  Delta-Window-Size (31-bits)   |
+% +----------------------------------+
+control_frame_window_update_v3_test() ->
+    ControlFrameData = <<1:1,                                 % C
+                         3:15/big-unsigned-integer,           % Version
+                         9:16/big-unsigned-integer,           % Type
+                         0:8/big-unsigned-integer,            % Flags
+                         8:24/big-unsigned-integer,           % Length (fixed)
+                         0:1, 835:31/big-unsigned-integer,    % Stream-ID
+                         0:1, 999:31/big-unsigned-integer >>, % Delta-Window-Size
+    DesiredControlFrame = #spdy_window_update{version=3,
+                                              streamid=835,
+                                              delta_size=999},
+    {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
+    ?assertEqual(DesiredControlFrame, ControlFrame).
+
 
 %%
 %% Header encoding tests

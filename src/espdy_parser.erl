@@ -88,7 +88,7 @@ parse_control_frame(V, ?SYN_REPLY, Flags, _Length,
                     headers=Headers}; 
 
 parse_control_frame(V, ?RST_STREAM, Flags, _Length,
-                    <<  _:1, StreamID:31/big-unsigned-integer,
+                    << _:1, StreamID:31/big-unsigned-integer,
                        StatusCode:32/big-unsigned-integer >>, _Z) when V =:= 2; V =:= 3 ->
     #spdy_rst_stream{version=V,
                      flags=Flags,
@@ -113,20 +113,27 @@ parse_control_frame(V=2, ?GOAWAY, _Flags, 4,
 
 parse_control_frame(V=3, ?GOAWAY, _Flags, 8,
                     << _:1,
-                      LastGoodStreamID:31/big-unsigned-integer,
-                      StatusCode:32/big-unsigned-integer >>, _Z) ->
+                       LastGoodStreamID:31/big-unsigned-integer,
+                       StatusCode:32/big-unsigned-integer >>, _Z) ->
     #spdy_goaway{version=V, lastgoodid=LastGoodStreamID, statuscode = StatusCode};
 
 parse_control_frame(V=2, ?HEADERS, Flags, _Length,
-                     << _:1, StreamID:31/big-unsigned-integer,
-                        _Unused:16/big-unsigned-integer,
-                        NVPairsData/binary >>, Z) ->
+                    << _:1, StreamID:31/big-unsigned-integer,
+                       _Unused:16/big-unsigned-integer,
+                       NVPairsData/binary >>, Z) ->
     parse_headers_frame(V, Flags, StreamID, NVPairsData, Z);
 
 parse_control_frame(V=3, ?HEADERS, Flags, _Length,
-                     << _:1, StreamID:31/big-unsigned-integer,
-                        NVPairsData/binary >>, Z) ->
+                    << _:1, StreamID:31/big-unsigned-integer,
+                       NVPairsData/binary >>, Z) ->
     parse_headers_frame(V, Flags, StreamID, NVPairsData, Z);
+
+parse_control_frame(V=3, ?WINDOW_UPDATE, _Flags, _Length,
+                    << _:1, StreamID:31/big-unsigned-integer,
+                      _:1, DeltaWindowSize:31 >>, _Z) ->
+    #spdy_window_update{version=V,
+                        streamid=StreamID,
+                        delta_size=DeltaWindowSize};
 
 parse_control_frame(_V, _Type, _Flags, _Len, _Data, _Z) ->
     undefined.
