@@ -91,6 +91,35 @@ parse_control_frame_settings_v3_test() ->
 % +------------------                |
 % |     Name/value header block      |
 % |             ...                  |
+parse_control_frame_syn_stream_v2_test() ->
+    DesiredHeaders = [{<<"accept">>,
+                       <<"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8">>},
+                      {<<"host">>,<<"localhost:6121">>},
+                      {<<"method">>,<<"GET">>},
+                      {<<"scheme">>,<<"https">>},
+                      {<<"url">>,<<"/">>},
+                      {<<"version">>,<<"HTTP/1.1">>}],
+    Data = <<1:1, 9:31/big-unsigned-integer,              % Stream-ID
+             1:1, 5:31/big-unsigned-integer,              % Associated-To-Stream-ID
+             0:2/big-unsigned-integer,                    % Priority
+             0:14/big-unsigned-integer,                   % Unused
+             (pack_headers(2, DesiredHeaders))/binary >>, % Name/value header block
+    ControlFrameData = <<1:1,                                  % C
+                         2:15/big-unsigned-integer,            % Version
+                         1:16/big-unsigned-integer,            % Type
+                         2:8/big-unsigned-integer,             % Flags
+                         (size(Data)):24/big-unsigned-integer, % Length size(Data)
+                         Data/binary >>,                       % Data
+    DesiredControlFrame = #spdy_syn_stream{version=2,
+                                           flags=2,
+                                           streamid=9,
+                                           associd=5,
+                                           priority=0,
+                                           headers=DesiredHeaders},
+    Zinf = new_zlib_context_inflate(),
+    {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, Zinf),
+    ?assertEqual(DesiredControlFrame, ControlFrame).
+
 parse_control_frame_syn_stream_v2_raw_test() ->
     ControlFrameData = <<128,2,0,1,1,0,1,34,0,0,0,1,0,0,0,0,0,0,56,234,223,
                          162,81,178,98,224,98,96,131,164,23,6,123,184,11,117,
@@ -181,7 +210,6 @@ parse_control_frame_syn_stream_v3_test() ->
                 zlib:deflate(Zdef, RawHeaderData, full)
             ]),
 
-    ?LOG("PACKED: ~p",[CompressedHeaderData]),
     ControlFrameData = <<0:1, 9:31/big-unsigned-integer, % Stream ID
                          0:1, 5:31/big-unsigned-integer, % Associated-To-Stream ID
                          7:3/big-unsigned-integer,       % Priority
@@ -189,14 +217,12 @@ parse_control_frame_syn_stream_v3_test() ->
                          0:8/big-unsigned-integer,       % Slot
                          CompressedHeaderData/binary >>, % Compressed Headers
     DataLength = size(ControlFrameData),
-    ?LOG("LENGTH: ~p",[DataLength]),
     RawControlFrame = <<1:1,                             % C
                      3:15/big-unsigned-integer,          % Version
                      1:16/big-unsigned-integer,          % Type
                      1:8/big-unsigned-integer,           % Flags
                      DataLength:24/big-unsigned-integer, % Length
                      ControlFrameData/binary >>,         % Data
-    ?LOG("CONTROL FRAME: ~p",[RawControlFrame]),
 
     DesiredHeaders = [{<<":method">>,<<"GET">>},
                       {<<":path">>,<<"/hello_world">>},

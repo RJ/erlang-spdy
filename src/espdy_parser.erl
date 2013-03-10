@@ -148,11 +148,11 @@ parse_headers_frame(Version, Flags, StreamID, NVPairsData, Z) ->
 %% Marshal frame back into binary for transmission
 
 build_frame(#spdy_data{streamid=StreamID,
-                       flags=Flags, 
+                       flags=Flags,
                        data=Data}, _Z) ->
     Length = size(Data),
     << 0:1, StreamID:31/big-unsigned-integer,
-       Flags:8/big-unsigned-integer, 
+       Flags:8/big-unsigned-integer,
        Length:24/big-unsigned-integer,
        Data/binary
     >>;   
@@ -299,7 +299,7 @@ encode_name_value_header(_Version = 2, Headers, Z) when is_list(Headers) ->
         [ <<Klen:16/unsigned-big-integer, K/binary, Vlen:16/unsigned-big-integer, V/binary>> | Acc ]
     end, [<< Num:16/unsigned-big-integer >>], Headers),
     ToDeflate = iolist_to_binary(lists:reverse(L)),
-    Deflated = iolist_to_binary([ 
+    Deflated = iolist_to_binary([
             zlib:deflate(Z, ToDeflate, full)
         ]),
     %%io:format("deflated: ~p\n",[Deflated]),
