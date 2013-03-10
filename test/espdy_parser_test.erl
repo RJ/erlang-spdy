@@ -10,9 +10,9 @@
 test_basic_operation() ->
     ?assertEqual(1, 1).
 
-%%
+%% =========================================================
 %% Control Frame Tests
-%%
+%% =========================================================
 
 %% Control Frame Layout:
 %% +----------------------------------+
@@ -33,7 +33,7 @@ test_basic_operation() ->
 % +----------------------------------+
 % |          ID/Value Pairs          |
 % |             ...                  |
-control_frame_settings_v2_test() ->
+parse_control_frame_settings_v2_test() ->
     ControlFrameData = <<1:1,                                     % C
                          2:15/big-unsigned-integer,               % Version
                          4:16/big-unsigned-integer,               % Type
@@ -46,7 +46,7 @@ control_frame_settings_v2_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
-control_frame_settings_v2_raw_test() ->
+parse_control_frame_settings_v2_raw_test() ->
     ControlFrameData = <<128,2,0,4,0,0,0,12,0,0,0,1,4,0,0,0,0,0,3,232>>,
     DesiredControlFrame = #spdy_settings{version=2,
                                          flags=0,
@@ -64,7 +64,7 @@ control_frame_settings_v2_raw_test() ->
 % +----------------------------------+
 % |          ID/Value Pairs          |
 % |             ...                  |
-control_frame_settings_v3_test() ->
+parse_control_frame_settings_v3_test() ->
     ControlFrameData = <<1:1,                                     % C
                          3:15/big-unsigned-integer,               % Version
                          4:16/big-unsigned-integer,               % Type
@@ -91,7 +91,7 @@ control_frame_settings_v3_test() ->
 % +------------------                |
 % |     Name/value header block      |
 % |             ...                  |
-control_frame_syn_stream_v2_raw_test() ->
+parse_control_frame_syn_stream_v2_raw_test() ->
     ControlFrameData = <<128,2,0,1,1,0,1,34,0,0,0,1,0,0,0,0,0,0,56,234,223,
                          162,81,178,98,224,98,96,131,164,23,6,123,184,11,117,
                          48,44,214,174,64,23,205,205,177,46,180,53,208,179,
@@ -160,7 +160,7 @@ control_frame_syn_stream_v2_raw_test() ->
 % |          Value   (string)          |    |
 % +------------------------------------+    |
 % |           (repeats)                |   <+
-control_frame_syn_stream_v3_test() ->
+parse_control_frame_syn_stream_v3_test() ->
     RawHeaderData = <<3:32/big-unsigned-integer, % Number of Name/Value Pairs
                       7:32/big-unsigned-integer, % Length of Name (Header 1)
                       <<":method">>/binary,      % Name
@@ -221,7 +221,7 @@ control_frame_syn_stream_v3_test() ->
 % +----------------------------------|
 % |            32-bit ID             |
 % +----------------------------------+
-control_frame_ping_v2_test() ->
+parse_control_frame_ping_v2_test() ->
     ControlFrameData = <<1:1,                              % C
                          2:15/big-unsigned-integer,        % Version
                          6:16/big-unsigned-integer,        % Type
@@ -232,7 +232,7 @@ control_frame_ping_v2_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
-control_frame_ping_v3_test() ->
+parse_control_frame_ping_v3_test() ->
     ControlFrameData = <<1:1,                              % C
                          3:15/big-unsigned-integer,        % Version
                          6:16/big-unsigned-integer,        % Type
@@ -253,7 +253,7 @@ control_frame_ping_v3_test() ->
 % +----------------------------------+
 % |          Status code             |
 % +----------------------------------+
-control_frame_rst_stream_v2_test() ->
+parse_control_frame_rst_stream_v2_test() ->
     ControlFrameData = <<1:1,                              % C
                          2:15/big-unsigned-integer,        % Version
                          3:16/big-unsigned-integer,        % Type
@@ -268,7 +268,7 @@ control_frame_rst_stream_v2_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
-control_frame_rst_stream_v3_test() ->
+parse_control_frame_rst_stream_v3_test() ->
     ControlFrameData = <<1:1,                              % C
                          3:15/big-unsigned-integer,        % Version
                          3:16/big-unsigned-integer,        % Type
@@ -291,7 +291,7 @@ control_frame_rst_stream_v3_test() ->
 % +----------------------------------|
 % |X|  Last-good-stream-ID (31 bits) |
 % +----------------------------------+
-control_frame_goaway_v2_test() ->
+parse_control_frame_goaway_v2_test() ->
     ControlFrameData = <<1:1,                                 % C
                          2:15/big-unsigned-integer,           % Version
                          7:16/big-unsigned-integer,           % Type
@@ -313,7 +313,7 @@ control_frame_goaway_v2_test() ->
 % +----------------------------------+
 % |          Status code             |
 % +----------------------------------+
-control_frame_goaway_v3_test() ->
+parse_control_frame_goaway_v3_test() ->
     ControlFrameData = <<1:1,                              % C
                          3:15/big-unsigned-integer,        % Version
                          7:16/big-unsigned-integer,        % Type
@@ -339,7 +339,7 @@ control_frame_goaway_v3_test() ->
 % |--------------------              |
 % | Name/value header block          |
 % +----------------------------------+
-control_frame_headers_v2_test() ->
+parse_control_frame_headers_v2_test() ->
     Headers = [{<<"method">>,<<"GET">>},
                {<<"url">>,<<"/">>},
                {<<"version">>,<<"HTTP/1.1">>}],
@@ -378,7 +378,7 @@ control_frame_headers_v2_test() ->
 % |          Value   (string)          |    |
 % +------------------------------------+    |
 % |           (repeats)                |   <+
-control_frame_headers_v3_test() ->
+parse_control_frame_headers_v3_test() ->
     Headers = [{<<":method">>,<<"GET">>},
                {<<":path">>,<<"/hello_world">>},
                {<<":version">>,<<"HTTP/1.1">>}],
@@ -407,7 +407,7 @@ control_frame_headers_v3_test() ->
 % +----------------------------------+
 % |X|  Delta-Window-Size (31-bits)   |
 % +----------------------------------+
-control_frame_window_update_v3_test() ->
+parse_control_frame_window_update_v3_test() ->
     ControlFrameData = <<1:1,                                 % C
                          3:15/big-unsigned-integer,           % Version
                          9:16/big-unsigned-integer,           % Type
@@ -421,10 +421,9 @@ control_frame_window_update_v3_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
-
-%%
+%% =========================================================
 %% Header encoding tests
-%%
+%% =========================================================
 encode_name_value_header_v2_test() ->
     Headers = [{<<"method">>,<<"GET">>},
                {<<"url">>,<<"/">>},
@@ -446,9 +445,9 @@ encode_name_value_header_v3_test() ->
     Packed = pack_headers(3, Headers),
     ?assertEqual(Desired, Packed).
 
-%%
+%% =========================================================
 %% Helpers
-%%
+%% =========================================================
 
 pack_headers(Version, Headers) when Version =:= 2; Version =:= 3 ->
     Zdef = new_zlib_context_deflate(Version),
