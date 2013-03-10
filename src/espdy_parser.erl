@@ -155,9 +155,9 @@ build_frame(#spdy_data{streamid=StreamID,
        Flags:8/big-unsigned-integer,
        Length:24/big-unsigned-integer,
        Data/binary
-    >>;   
+    >>;
 
-build_frame(#spdy_syn_stream{version = Version,
+build_frame(#spdy_syn_stream{version = Version = 2,
                              flags=Flags,
                              streamid=StreamID,
                              associd=AssocID,
@@ -166,8 +166,23 @@ build_frame(#spdy_syn_stream{version = Version,
     NVData = encode_name_value_header(Version, Headers, Z),
     bcf(Version, ?SYN_STREAM, Flags, << 0:1, StreamID:31/big-unsigned-integer,
                                         0:1, AssocID:31/big-unsigned-integer,
-                                        Priority:2/big-unsigned-integer, %% size is 3 in v3
-                                        0:14/unit:1, %% size is 12 in v3 (UNUSED)
+                                        Priority:2/big-unsigned-integer,
+                                        0:14/unit:1, % Unused
+                                        NVData/binary >>);
+
+build_frame(#spdy_syn_stream{version = Version = 3,
+                             flags=Flags,
+                             streamid=StreamID,
+                             associd=AssocID,
+                             priority=Priority,
+                             slot=Slot,
+                             headers=Headers}, Z) ->
+    NVData = encode_name_value_header(Version, Headers, Z),
+    bcf(Version, ?SYN_STREAM, Flags, << 0:1, StreamID:31/big-unsigned-integer,
+                                        0:1, AssocID:31/big-unsigned-integer,
+                                        Priority:3/big-unsigned-integer,
+                                        0:5/unit:1, % Unused
+                                        Slot:8/big-unsigned-integer,
                                         NVData/binary >>);
 
 build_frame(#spdy_syn_reply{ version = Version,

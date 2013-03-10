@@ -54,6 +54,19 @@ parse_control_frame_settings_v2_raw_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
+build_control_frame_settings_v2_test() ->
+    ControlFrame = #spdy_settings{version=2,
+                                  flags=2,
+                                  settings=[{4, {1, 100}}]},
+    DesiredData = <<1:1,                                     % C
+                    2:15/big-unsigned-integer,               % Version
+                    4:16/big-unsigned-integer,               % Type
+                    2:8/big-unsigned-integer,                % Flags
+                    12:24/big-unsigned-integer,              % Length size(Data)
+                    <<0,0,0,1,0,0,4,1,0,0,0,100>>/binary >>, % Data
+    ActualData = espdy_parser:build_frame(ControlFrame, undefined),
+    ?assertEqual(DesiredData, ActualData).
+
 % SETTINGS Control Frame Layout (v3):
 % +----------------------------------+
 % |1|   version    |         4       |
@@ -76,6 +89,19 @@ parse_control_frame_settings_v3_test() ->
                                          settings=[{4, {1, 100}}]},
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
+
+build_control_frame_settings_v3_test() ->
+    ControlFrame = #spdy_settings{version=3,
+                                  flags=2,
+                                  settings=[{4, {1, 100}}]},
+    DesiredData = <<1:1,                                     % C
+                    3:15/big-unsigned-integer,               % Version
+                    4:16/big-unsigned-integer,               % Type
+                    2:8/big-unsigned-integer,                % Flags
+                    12:24/big-unsigned-integer,              % Length size(Data)
+                    <<0,0,0,1,0,0,4,1,0,0,0,100>>/binary >>, % Data
+    ActualData = espdy_parser:build_frame(ControlFrame, undefined),
+    ?assertEqual(DesiredData, ActualData).
 
 % SYN_STREAM Control Frame Layout (v2):
 % +----------------------------------+
@@ -166,6 +192,36 @@ parse_control_frame_syn_stream_v2_raw_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, Zinf),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
+build_control_frame_syn_stream_v2_test() ->
+    Headers = [{<<"accept">>,
+                <<"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8">>},
+               {<<"host">>,<<"localhost:6121">>},
+               {<<"method">>,<<"GET">>},
+               {<<"scheme">>,<<"https">>},
+               {<<"url">>,<<"/">>},
+               {<<"version">>,<<"HTTP/1.1">>}],
+    ControlFrame = #spdy_syn_stream{version=2,
+                                    flags=2,
+                                    streamid=65,
+                                    associd=17,
+                                    priority=0,
+                                    headers=Headers},
+    PackedHeaders = pack_headers(2, Headers),
+    DataLength = size(PackedHeaders) + 10,
+    DesiredData = <<1:1,                                % C
+                    2:15/big-unsigned-integer,          % Version
+                    1:16/big-unsigned-integer,          % Type
+                    2:8/big-unsigned-integer,           % Flags
+                    DataLength:24/big-unsigned-integer, % Length
+                    0:1, 65:31/big-unsigned-integer,    % Stream-ID
+                    0:1, 17:31/big-unsigned-integer,    % Associated-To-Stream-ID
+                    0:2/big-unsigned-integer,           % Priority
+                    0:14/big-unsigned-integer,          % Unused
+                    PackedHeaders/binary >>,            % Name/value header block
+    Zdef = new_zlib_context_deflate(2),
+    ActualData = espdy_parser:build_frame(ControlFrame, Zdef),
+    ?assertEqual(DesiredData, ActualData).
+
 % SYN_STREAM Control Frame Layout (v3):
 % +------------------------------------+
 % |1|    version    |         1        |
@@ -238,6 +294,34 @@ parse_control_frame_syn_stream_v3_test() ->
     ok = zlib:inflateInit(Zinf),
     {ControlFrame, _Z} = espdy_parser:parse_frame(RawControlFrame, Zinf),
     ?assertEqual(DesiredControlFrame, ControlFrame).
+
+build_control_frame_syn_stream_v3_test() ->
+    Headers = [{<<":method">>,<<"GET">>},
+               {<<":path">>,<<"/hello_world">>},
+               {<<":version">>,<<"HTTP/1.1">>}],
+    ControlFrame = #spdy_syn_stream{version=3,
+                                    flags=2,
+                                    streamid=65,
+                                    associd=17,
+                                    priority=7,
+                                    slot=0,
+                                    headers=Headers},
+    PackedHeaders = pack_headers(3, Headers),
+    DataLength = size(PackedHeaders) + 10,
+    DesiredData = <<1:1,                                % C
+                    3:15/big-unsigned-integer,          % Version
+                    1:16/big-unsigned-integer,          % Type
+                    2:8/big-unsigned-integer,           % Flags
+                    DataLength:24/big-unsigned-integer, % Length
+                    0:1, 65:31/big-unsigned-integer,    % Stream-ID
+                    0:1, 17:31/big-unsigned-integer,    % Associated-To-Stream-ID
+                    7:3/big-unsigned-integer,           % Priority
+                    0:5/big-unsigned-integer,           % Unused
+                    0:8/big-unsigned-integer,           % Slot
+                    PackedHeaders/binary >>,            % Name/value header block
+    Zdef = new_zlib_context_deflate(3),
+    ActualData = espdy_parser:build_frame(ControlFrame, Zdef),
+    ?assertEqual(DesiredData, ActualData).
 
 % PING Control Frame Layout (v2/v3):
 % +----------------------------------+
