@@ -20,13 +20,32 @@
 
 -export([init/3, closed/2, headers_updated/3, handle_data/2]). %% API
 
+% header name for spdy version
+hfv(scheme,  _Version = 2) -> <<"scheme">>;
+hfv(status,  _Version = 2) -> <<"status">>;
+hfv(host,    _Version = 2) -> <<"host">>;
+hfv(method,  _Version = 2) -> <<"method">>;
+hfv(path,    _Version = 2) -> <<"url">>;
+hfv(version, _Version = 2) -> <<"version">>;
+
+hfv(scheme,  _Version = 3) -> <<":scheme">>;
+hfv(status,  _Version = 3) -> <<":status">>;
+hfv(host,    _Version = 3) -> <<":host">>;
+hfv(method,  _Version = 3) -> <<":method">>;
+hfv(path,    _Version = 3) -> <<":path">>;
+hfv(version, _Version = 3) -> <<":version">>;
+
+hfv(Name, _) -> atom_to_list(Name).
+
 init(_Id, Headers, SpdyOpts) ->
     ?LOG("INIT opts ~p",[SpdyOpts]),
-    Scheme = proplists:get_value(<<"scheme">>, Headers), %% http | https
-    Host = proplists:get_value(<<"host">>, Headers),     %% localhost:6121
-    Method = proplists:get_value(<<"method">>, Headers), %% GET
-    Url = proplists:get_value(<<"url">>, Headers),       %% /
+    SpdyVersion = proplists:get_value(spdy_version, SpdyOpts),
+    Scheme = proplists:get_value(hfv(scheme, SpdyVersion), Headers), %% http | https
+    Host = proplists:get_value(hfv(host, SpdyVersion), Headers),     %% localhost:6121
+    Method = proplists:get_value(hfv(method, SpdyVersion), Headers), %% GET
+    Url = proplists:get_value(hfv(path, SpdyVersion), Headers),      %% /
     %% if any of these fields are missing, it's an error
+    io:format("scheme=~p host=~p method=~p url=~p~n", [Scheme, Host, Method, Url]),
     case Scheme =:= undefined orelse
          Host   =:= undefined orelse
          Method =:= undefined orelse
@@ -37,16 +56,20 @@ init(_Id, Headers, SpdyOpts) ->
             case Url of
                 <<"/settings-me">> ->
                     %% invent some settings to save
-                    Settings = [ 
-                                 {?SETTINGS_ROUND_TRIP_TIME,        { ?SETTINGS_FLAG_PERSIST_VALUE, 42}},
-                                 {?SETTINGS_MAX_CONCURRENT_STREAMS, { ?SETTINGS_FLAG_PERSIST_VALUE, 9999 }}
+                    Settings = [#spdy_setting_pair{id=?SETTINGS_ROUND_TRIP_TIME,
+                                                   flags=?SETTINGS_FLAG_PERSIST_VALUE,
+                                                   value=42},
+                                #spdy_setting_pair{id=?SETTINGS_MAX_CONCURRENT_STREAMS,
+                                                   flags=?SETTINGS_FLAG_PERSIST_VALUE,
+                                                   value=9999}
                                ],
-                    F = #spdy_settings{ flags=?SETTINGS_FLAG_CLEAR_PREVIOUSLY_PERSISTED_SETTINGS, settings=Settings},
+                    F = #spdy_settings{version=SpdyVersion,
+                                       flags=?SETTINGS_FLAG_CLEAR_PREVIOUSLY_PERSISTED_SETTINGS,
+                                       settings=Settings},
                     espdy_stream:send_frame(self(), F),
-                    ResponseHeaders = [ 
-                        {<<"url">>, <<"http://localhost:6121/settings-me">>}, %% url only needed in push streams usually?
-                        {<<"status">>, <<"200 OK">>},
-                        {<<"version">>, <<"HTTP/1.1">>},
+                    ResponseHeaders = [
+                        {hfv(status, SpdyVersion), <<"200 OK">>},
+                        {hfv(version, SpdyVersion), <<"HTTP/1.1">>},
                         {<<"content-type">>, <<"text/plain">>}
                     ],
                     Body = <<"This stream sent a settings frame, informing your browser that the server supports 9999 max concurrent streams">>,
@@ -55,21 +78,20 @@ init(_Id, Headers, SpdyOpts) ->
                 <<"/">> ->
 
                     %% Ignore the request, and just return a static page response:
-                    ResponseHeaders = [ 
-                        {<<"url">>, <<"http://localhost:6121/">>}, %% url only needed in push streams usually?
-                        {<<"status">>, <<"200 OK">>},
-                        {<<"version">>, <<"HTTP/1.1">>},
+                    ResponseHeaders = [
+                        {hfv(status, SpdyVersion), <<"200 OK">>},
+                        {hfv(version, SpdyVersion), <<"HTTP/1.1">>},
                         {<<"content-type">>, <<"text/plain">>},
                         {<<"content-length">>, <<"16">>}
                     ],
                     Body = <<"Hello SPDY World">>,
                     {ok, ResponseHeaders, Body};
                 _ ->
-                    ResponseHeaders = [ 
-                        {<<"status">>, <<"400 Not Found">>},
-                        {<<"version">>, <<"HTTP/1.1">>},
-                        {<<"content-type">>, <<"text/html">>}
-%                        {<<"content-length">>, <<"16">>}
+                    ResponseHeaders = [
+                        {hfv(status, SpdyVersion), <<"400 Not Found">>},
+                        {hfv(version, SpdyVersion), <<"HTTP/1.1">>},
+                        {<<"content-type">>, <<"text/html">>},
+                        {<<"content-length">>, <<"16">>}
                     ],
                     Body = <<"<h1>NOT FOUND</h1>">>,
                     {ok, ResponseHeaders, Body}
