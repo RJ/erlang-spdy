@@ -243,9 +243,6 @@ build_frame(#spdy_window_update{version = Version = 3,
     bcf(Version, ?WINDOW_UPDATE, 0, << 0:1, StreamID:31/big-unsigned-integer,
                                        0:1, DeltaWindowSize:31/big-unsigned-integer >>).
 
-%% TODO not implemented build_frame for all types yet
-
-
 %% Build Control Frame (common header)
 bcf(undefined, T,F,D) -> bcf(2,T,F,D);
 bcf(Version, Type, Flags, Data) ->
@@ -260,19 +257,14 @@ bcf(Version, Type, Flags, Data) ->
 
 %% 2.6.9 Name/Value Header Block
 parse_name_val_header(Version = 2, Bin, Z) ->
-    ?LOG("Inflating with Z=~p",[Z]),
     Unpacked = unpack(Z, Bin, ?HEADERS_ZLIB_DICT),
-%%    zlib:inflateReset(Z),
     <<Num:16/big-unsigned-integer, Rest/binary>> = Unpacked,
     parse_name_val_pairs(Version, Num, Rest, []);
 
+%% 2.6.10 Name/Value Header Block
 parse_name_val_header(Version = 3, Bin, Z) ->
-    ?LOG("Inflating v3 with Z=~p",[Z]),
-    ?LOG("ABOUT TO UNPACK: ~p", [Bin]),
     Unpacked = unpack(Z, Bin, ?HEADERS_ZLIB_DICT_V3),
-    ?LOG("UNPACKED: ~p", [Unpacked]),
     <<Num:32/big-unsigned-integer, Rest/binary>> = Unpacked,
-    ?LOG("NUM PAIRS: ~p", [Num]),
     parse_name_val_pairs(Version, Num, Rest, []).
 
 parse_name_val_pairs(_V, 0, _, Acc) ->
