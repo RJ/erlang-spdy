@@ -25,6 +25,7 @@
 
 -record(state, {
     spdy_opts,
+    spdy_version = 3 :: integer(),
     socket :: inet:socket(),
     transport :: module(),
     last_client_sid = 0,
@@ -50,21 +51,26 @@ snd(Pid, StreamID, Frame) when is_pid(Pid), is_integer(StreamID) ->
 %%
 
 init([Socket, Transport, CBMod, Opts]) ->
+    SpdyVersion = proplists:get_value(spdy_version, Opts, 3),
     %% Init zlib context used for headers blocks
     Zinf = zlib:open(),
     ok = zlib:inflateInit(Zinf),
     Zdef = zlib:open(),
     ok = zlib:deflateInit(Zdef),
     %%ok = zlib:deflateInit(Z, best_compression,deflated, 15, 9, default),
-    zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT),
-    State = #state{ socket=Socket, 
+    case SpdyVersion of
+        2 -> zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT);
+        3 -> zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT_V3)
+    end,
+    State = #state{ socket=Socket,
                     cbmod=CBMod,
                     transport=Transport,
                     z_context_inf=Zinf,
                     z_context_def=Zdef,
+                    spdy_version = SpdyVersion,
                     spdy_opts=Opts
                   },
-    ?LOG("SPDY_PROTO init ~p ~p",[self(), State]),
+    ?LOG("SPDY_VERSION init v~B ~p ~p",[SpdyVersion, self(), State]),
     {ok, State}.
 
 handle_call(none_implemented, _From, State) ->
@@ -120,20 +126,20 @@ socket_write(F, #state{transport=T,socket=S, z_context_def=Z}) ->
 process_buffer(State = #state{buffer = Buffer, z_context_inf = Z}) ->
     case espdy_parser:parse_frame(Buffer, Z) of
         %% no full frame yet, read more data
-        undefined -> 
+        undefined ->
             {noreply, State};
         {undefined, Rest} ->
             ?LOG("Dropped unhandled control frame",[]),
             process_buffer(State#state{buffer=Rest});
         %% frame received
-        {F, Rest} when is_tuple(F) -> %% will by a #spdy_ record
+        {F, Rest} when is_tuple(F) -> %% will be a #spdy_ record
             ?LOG("GOT FRAME: ~w",[F]),
             NewState = handle_frame(F, State#state{buffer=Rest}),
             %% could be another frame in the buffer:
             process_buffer(NewState)
     end.
 
-%% MANAGEMENT OF ACTIVE STREAMS 
+%% MANAGEMENT OF ACTIVE STREAMS
 %% stored in a proplist for now.
 
 %% returns undefined | #stream{}
@@ -147,13 +153,13 @@ update_stream(Id, NewStream=#stream{}, State=#state{streams=Slist}) when is_inte
 remove_stream(Id, State=#state{streams=Slist}) when is_integer(Id), Id > 0 ->
     NewSlist = proplists:delete(Id, Slist),
     State#state{streams=NewSlist}.
-%% END MANAGEMENT OF ACTIVE STREAMS 
+%% END MANAGEMENT OF ACTIVE STREAMS
 
 
 
 
 merge_headers(NewList, OldList) ->
-    NewList ++ OldList. %% TODO (overwrite, no dupes, etc)  
+    NewList ++ OldList. %% TODO (overwrite, no dupes, etc)
 
 %% syntactic sugar
 hasflag(Flags, Flag) -> (Flags band Flag) == Flag.
@@ -162,14 +168,14 @@ hasflag(Flags, Flag) -> (Flags band Flag) == Flag.
 %% CONTROL FRAMES:
 
 %% The SYN_STREAM control frame allows the sender to asynchronously create a stream between the endpoints.
-handle_frame(#spdy_syn_stream{  flags=Flags, 
-                                        streamid=StreamID, 
-                                        associd=AssocStreamID, 
-                                        priority=Priority, 
-                                        headers=Headers
-                                     }, State=#state{}) ->
-    %% If the client is initiating the stream, the Stream-ID must be odd. 
-    %% 0 is not a valid Stream-ID. Stream-IDs from each side of the connection 
+handle_frame(#spdy_syn_stream{  flags=Flags,
+                                streamid=StreamID,
+                                associd=AssocStreamID,
+                                priority=Priority,
+                                headers=Headers
+                             }, State=#state{}) ->
+    %% If the client is initiating the stream, the Stream-ID must be odd.
+    %% 0 is not a valid Stream-ID. Stream-IDs from each side of the connection
     %% must increase monotonically as new streams are created.
     case StreamID =:= 0 orelse 
          StreamID rem 2 =:= 0 orelse
@@ -281,7 +287,7 @@ handle_frame(#spdy_data{ streamid=StreamID,
                          data=Data }, State=#state{}) ->
     case lookup_stream(StreamID, State) of
         undefined ->
-            F = #spdy_rst_stream{version=2,
+            F = #spdy_rst_stream{version=State#state.spdy_version,
                                  streamid=StreamID, 
                                  statuscode=?INVALID_STREAM},
             socket_write(F, State),
@@ -294,14 +300,15 @@ handle_frame(#spdy_data{ streamid=StreamID,
 
 session_error(_Err, State = #state{}) ->
     LastGoodStreamID = State#state.last_client_sid,
-    F = #spdy_goaway{version=2,
+    % need to figure out StatusCode for v3
+    F = #spdy_goaway{version=State#state.spdy_version,
                      lastgoodid=LastGoodStreamID},
     socket_write(F, State),
     exit(normal).
 
 stream_error(Err, #stream{id=Id}, State = #state{}) ->
     StatusCode = espdy_parser:atom_to_status_code(Err),
-    F = #spdy_rst_stream{version=2,
+    F = #spdy_rst_stream{version=State#state.spdy_version,
                          streamid=Id,
                          statuscode=StatusCode},
     socket_write(F, State),
