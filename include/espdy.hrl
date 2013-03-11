@@ -5,8 +5,8 @@
 -define(SPDY_VERSION, 2).
 
 %% DATA FRAMES:
--record(spdy_data, {   
-    streamid :: integer(), 
+-record(spdy_data, {
+    streamid :: integer(),
     flags = 0 :: integer(),
     data :: binary()
 }).
@@ -22,19 +22,19 @@
     headers     :: list()
 }).
 -record(spdy_syn_reply, {
-    version = 2 :: integer(), 
+    version = 2 :: integer(),
     flags = 0   :: integer(),
     streamid    :: integer(),
     headers     :: list()
 }).
 -record(spdy_rst_stream, {
-    version = 2 :: integer(), 
+    version = 2 :: integer(),
     flags = 0   :: integer(),
     streamid    :: integer(),
     statuscode  :: integer()
 }).
 -record(spdy_settings, {
-    version = 2 :: integer(), 
+    version = 2 :: integer(),
     flags = 0   :: integer(),
     settings    :: list()
 }).
@@ -64,16 +64,16 @@
 
 %% STREAMS
 -record(stream, {
-    id :: integer(), %% If the server is initiating the stream, the Stream-ID must be even. 
-                     %% If the client is initiating the stream, the Stream-ID must be odd. 
+    id :: integer(), %% If the server is initiating the stream, the Stream-ID must be even.
+                     %% If the client is initiating the stream, the Stream-ID must be odd.
                      %% 0 is not a valid Stream-ID.
     pid,
     associd = 0 :: integer(),
     headers = [] :: list(), %% Streams optionally carry a set of name/value header pairs.
 %%    clientclosed = false, %% them
 %%    serverclosed = false, %% us
-    priority :: integer(), %% The creator of a stream assigns a priority for that stream. 
-                           %% Priority is represented as an integer from 0 to 7. 
+    priority :: integer(), %% The creator of a stream assigns a priority for that stream.
+                           %% Priority is represented as an integer from 0 to 7.
                            %% 0 represents the highest priority and 7 represents the lowest priority.
     syn_replied = false :: boolean(), %% true once syn_reply was seen/sent
     window = 64*1024 :: integer() %% default transmit window size is 64KB
@@ -111,7 +111,7 @@
 -define(SETTINGS_FLAG_PERSISTED, 2).
 -define(SETTINGS_FLAG_CLEAR_PREVIOUSLY_PERSISTED_SETTINGS, 1).
 
-%% The entire contents of the name/value header block is compressed using zlib deflate.  
+%% The entire contents of the name/value header block is compressed using zlib deflate.
 %% There is a single zlib stream (context) for all name value pairs in one direction on a connection
 -define(HEADERS_ZLIB_DICT, <<"optionsgetheadpostputdeletetraceacceptaccept-charsetaccept-encodingaccept-languageauthorizationexpectfromhostif-modified-sinceif-matchif-none-matchif-rangeif-unmodifiedsincemax-forwardsproxy-authorizationrangerefererteuser-agent100101200201202203204205206300301302303304305306307400401402403404405406407408409410411412413414415416417500501502503504505accept-rangesageetaglocationproxy-authenticatepublicretry-afterservervarywarningwww-authenticateallowcontent-basecontent-encodingcache-controlconnectiondatetrailertransfer-encodingupgradeviawarningcontent-languagecontent-lengthcontent-locationcontent-md5content-rangecontent-typeetagexpireslast-modifiedset-cookieMondayTuesdayWednesdayThursdayFridaySaturdaySundayJanFebMarAprMayJunJulAugSepOctNovDecchunkedtext/htmlimage/pngimage/jpgimage/gifapplication/xmlapplication/xhtmltext/plainpublicmax-agecharset=iso-8859-1utf-8gzipdeflateHTTP/1.1statusversionurl",0>>).
 
