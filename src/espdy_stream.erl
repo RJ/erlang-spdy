@@ -20,13 +20,14 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
      terminate/2, code_change/3]).
 
--record(state, {streamid, 
+-record(state, {streamid,
                 clientclosed = false, %% them
                 serverclosed = false, %% us
-                pid, 
-                mod, 
-                mod_state, 
-                headers, 
+                pid,
+                mod,
+                mod_state,
+                headers,
+                spdy_version,
                 spdy_opts}).
 
 %% API
@@ -65,10 +66,12 @@ init([StreamID, Pid, Headers, Mod, Opts]) ->
 %%    ok = zlib:deflateInit(Z),
     %%ok = zlib:deflateInit(Z, best_compression,deflated, 15, 9, default),
 %%    zlib:deflateSetDictionary(Z, ?HEADERS_ZLIB_DICT),
-    {ok, #state{streamid=StreamID, 
-                pid=Pid, 
-                mod=Mod, 
-                headers=Headers, 
+    SpdyVersion = proplists:get_value(spdy_version, Opts),
+    {ok, #state{streamid=StreamID,
+                pid=Pid,
+                mod=Mod,
+                headers=Headers,
+                spdy_version=SpdyVersion,
                 spdy_opts=Opts}}.
 
 handle_call(_Request, _From, State) ->
@@ -189,7 +192,8 @@ code_change(_OldVsn, State, _Extra) ->
 send_http_response(Headers, Body, State = #state{}) when is_list(Headers), is_binary(Body) ->
     io:format("Respond with: ~p ~p\n",[Headers, Body]),
     StreamID = State#state.streamid,
-    F = #spdy_syn_reply{ streamid = StreamID, 
+    F = #spdy_syn_reply{ version = State#state.spdy_version,
+                         streamid = StreamID,
                          headers = Headers
                        },
     espdy_session:snd(State#state.pid, StreamID, F),
