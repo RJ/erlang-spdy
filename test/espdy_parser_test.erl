@@ -31,18 +31,20 @@ test_basic_operation() ->
 % +----------------------------------+
 % |         Number of entries        |
 % +----------------------------------+
-% |          ID/Value Pairs          |
-% |             ...                  |
+% |    ID (24 bits)   | ID_Flags (8) | <--| ID/Value Pairs, repeats
+% +----------------------------------+    | for each pair.
+% |          Value (32 bits)         | <--|
+% +----------------------------------+
 parse_control_frame_settings_v2_test() ->
     ControlFrameData = <<1:1,                                     % C
                          2:15/big-unsigned-integer,               % Version
                          4:16/big-unsigned-integer,               % Type
                          2:8/big-unsigned-integer,                % Flags
                          12:24/big-unsigned-integer,              % Length size(Data)
-                         <<0,0,0,1,0,0,4,1,0,0,0,100>>/binary >>, % Data
+                         <<0,0,0,1,4,0,0,0,0,0,3,232>>/binary >>, % Data
     DesiredControlFrame = #spdy_settings{version=2,
                                          flags=2,
-                                         settings=[{4, {1, 100}}]},
+                                         settings=[#spdy_setting_pair{flags=0, id=4, value=1000}]},
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
@@ -50,20 +52,20 @@ parse_control_frame_settings_v2_raw_test() ->
     ControlFrameData = <<128,2,0,4,0,0,0,12,0,0,0,1,4,0,0,0,0,0,3,232>>,
     DesiredControlFrame = #spdy_settings{version=2,
                                          flags=0,
-                                         settings=[{262144,{0,1000}}]},
+                                         settings=[#spdy_setting_pair{flags=0, id=4, value=1000}]},
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
 build_control_frame_settings_v2_test() ->
     ControlFrame = #spdy_settings{version=2,
                                   flags=2,
-                                  settings=[{4, {1, 100}}]},
+                                  settings=[#spdy_setting_pair{flags=0, id=4, value=1000}]},
     DesiredData = <<1:1,                                     % C
                     2:15/big-unsigned-integer,               % Version
                     4:16/big-unsigned-integer,               % Type
                     2:8/big-unsigned-integer,                % Flags
                     12:24/big-unsigned-integer,              % Length size(Data)
-                    <<0,0,0,1,0,0,4,1,0,0,0,100>>/binary >>, % Data
+                    <<0,0,0,1,4,0,0,0,0,0,3,232>>/binary >>, % Data
     ActualData = espdy_parser:build_frame(ControlFrame, undefined),
     ?assertEqual(DesiredData, ActualData).
 
@@ -75,31 +77,39 @@ build_control_frame_settings_v2_test() ->
 % +----------------------------------+
 % |         Number of entries        |
 % +----------------------------------+
-% |          ID/Value Pairs          |
-% |             ...                  |
+% |   Flags (8 bits)  |    ID (24)   | <--| ID/Value Pairs, repeats
+% +----------------------------------+    | for each pair.
+% |          Value (32 bits)         | <--|
+% +----------------------------------+
 parse_control_frame_settings_v3_test() ->
-    ControlFrameData = <<1:1,                                     % C
-                         3:15/big-unsigned-integer,               % Version
-                         4:16/big-unsigned-integer,               % Type
-                         2:8/big-unsigned-integer,                % Flags
-                         12:24/big-unsigned-integer,              % Length size(Data)
-                         <<0,0,0,1,0,0,4,1,0,0,0,100>>/binary >>, % Data
+    ControlFrameData = <<1:1,                            % C
+                         3:15/big-unsigned-integer,      % Version
+                         4:16/big-unsigned-integer,      % Type
+                         2:8/big-unsigned-integer,       % Flags
+                         12:24/big-unsigned-integer,     % Length size(Data)
+                         1:32/big-unsigned-integer,      % Number of entries
+                         2:8/big-unsigned-integer,       % Entry Flags
+                         8:24/big-unsigned-integer,      % Entry ID
+                         250:32/big-unsigned-integer >>, % Entry Value
     DesiredControlFrame = #spdy_settings{version=3,
                                          flags=2,
-                                         settings=[{4, {1, 100}}]},
+                                         settings=[#spdy_setting_pair{flags=2, id=8, value=250}]},
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
 build_control_frame_settings_v3_test() ->
     ControlFrame = #spdy_settings{version=3,
                                   flags=2,
-                                  settings=[{4, {1, 100}}]},
-    DesiredData = <<1:1,                                     % C
-                    3:15/big-unsigned-integer,               % Version
-                    4:16/big-unsigned-integer,               % Type
-                    2:8/big-unsigned-integer,                % Flags
-                    12:24/big-unsigned-integer,              % Length size(Data)
-                    <<0,0,0,1,0,0,4,1,0,0,0,100>>/binary >>, % Data
+                                  settings=[#spdy_setting_pair{flags=2, id=8, value=250}]},
+    DesiredData = <<1:1,                            % C
+                    3:15/big-unsigned-integer,      % Version
+                    4:16/big-unsigned-integer,      % Type
+                    2:8/big-unsigned-integer,       % Flags
+                    12:24/big-unsigned-integer,     % Length size(Data)
+                    1:32/big-unsigned-integer,      % Number of entries
+                    2:8/big-unsigned-integer,       % Entry Flags
+                    8:24/big-unsigned-integer,      % Entry ID
+                    250:32/big-unsigned-integer >>, % Entry Value
     ActualData = espdy_parser:build_frame(ControlFrame, undefined),
     ?assertEqual(DesiredData, ActualData).
 

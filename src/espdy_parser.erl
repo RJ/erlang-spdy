@@ -105,10 +105,15 @@ parse_control_frame(V, ?RST_STREAM, Flags, _Length,
                      streamid=StreamID,
                      statuscode=StatusCode};
 
-parse_control_frame(V, ?SETTINGS, Flags, _Length, Data, _Z) when V =:= 2; V =:= 3 ->
+parse_control_frame(V=2, ?SETTINGS, Flags, _Length, Data, _Z) when V =:= 2; V =:= 3 ->
     #spdy_settings{ version=V,
                     flags=Flags,
-                    settings=parse_settings(Data)};
+                    settings=parse_settings(V, Data)};
+
+parse_control_frame(V=3, ?SETTINGS, Flags, _Length, Data, _Z) when V =:= 2; V =:= 3 ->
+    #spdy_settings{ version=V,
+                    flags=Flags,
+                    settings=parse_settings(V, Data)};
 
 % NOOP frame was removed in v3
 parse_control_frame(V=2, ?NOOP, _Flags, 0, _Data, _Z) ->
@@ -253,7 +258,7 @@ build_frame(#spdy_goaway{    version = Version = 3,
 build_frame(#spdy_settings{  version = Version,
                              flags = Flags,
                              settings = Settings }, _Z) ->
-    bcf(Version, ?SETTINGS, Flags, encode_settings(Settings));
+    bcf(Version, ?SETTINGS, Flags, encode_settings(Version, Settings));
 
 build_frame(#spdy_window_update{version = Version = 3,
                                 streamid=StreamID,
@@ -306,29 +311,48 @@ parse_name_val_pairs(Version = 3, Num, << NameLen:32/big-unsigned-integer,
 
 %% END nvpair stuff
 
-parse_settings(<<Num:32/big-unsigned-integer, Data/binary>>) ->
-    parse_settings_pair(Num, Data, []).
+parse_settings(Version, <<Num:32/big-unsigned-integer, Data/binary>>) ->
+    parse_settings_pair(Version, Num, Data, []).
 
-parse_settings_pair(0, _, Acc) -> lists:reverse(Acc);
-parse_settings_pair(Num, <<Id:24/big-unsigned-integer,
-                           Flags:8/big-unsigned-integer,
-                           Value:32/big-unsigned-integer,
-                           Rest/binary>>, Acc) ->
-    Item = {Id, {Flags, Value}},
-    parse_settings_pair(Num-1, Rest, [Item|Acc]).
+parse_settings_pair(_Version, _Num = 0, _, Acc) -> lists:reverse(Acc);
+
+parse_settings_pair(Version = 2, Num, <<Id:24/little-unsigned-integer, % Bug in the draft2 spec
+                                        Flags:8/big-unsigned-integer,
+                                        Value:32/big-unsigned-integer,
+                                        Rest/binary>>, Acc) ->
+    Item = #spdy_setting_pair{id=Id, flags=Flags, value=Value},
+    parse_settings_pair(Version, Num-1, Rest, [Item|Acc]);
+
+parse_settings_pair(Version = 3, Num, <<Flags:8/big-unsigned-integer,
+                                        Id:24/big-unsigned-integer,
+                                        Value:32/big-unsigned-integer,
+                                        Rest/binary>>, Acc) ->
+    Item = #spdy_setting_pair{id=Id, flags=Flags, value=Value},
+    parse_settings_pair(Version, Num-1, Rest, [Item|Acc]).
 
 %% [{key, {flags, val}}..]
-encode_settings(Settings) ->
-    {Num, Bin} = encode_settings(Settings, <<>>, 0),
+encode_settings(Version, Settings) ->
+    {Num, Bin} = encode_settings(Version, Settings, <<>>, 0),
     << Num:32/big-unsigned-integer, Bin/binary>>.
 
-encode_settings([], Acc, Num) -> 
+encode_settings(_Version, [], Acc, Num) ->
     {Num, Acc};
-encode_settings([{Id,{Flags,Val}}|Rest], Acc, Num) ->
-    Item = << Id:24/big-unsigned-integer, 
-              Flags:8/big-unsigned-integer, 
+encode_settings(Version = 2,
+                [#spdy_setting_pair{id = Id, flags = Flags, value = Val}|Rest],
+                Acc,
+                Num) ->
+    Item = << Id:24/little-unsigned-integer, % Bug in the draft2 spec
+              Flags:8/big-unsigned-integer,
               Val:32/big-unsigned-integer >>,
-    encode_settings(Rest, << Acc/binary, Item/binary >>, Num+1).
+    encode_settings(Version, Rest, << Acc/binary, Item/binary >>, Num+1);
+encode_settings(Version = 3,
+                [#spdy_setting_pair{id = Id, flags = Flags, value = Val}|Rest],
+                Acc,
+                Num) ->
+    Item = << Flags:8/big-unsigned-integer,
+              Id:24/big-unsigned-integer,
+              Val:32/big-unsigned-integer >>,
+    encode_settings(Version, Rest, << Acc/binary, Item/binary >>, Num+1).
 
 
 

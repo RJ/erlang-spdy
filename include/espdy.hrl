@@ -34,6 +34,11 @@
     flags = 0   :: integer(),
     settings    :: list()
 }).
+-record(spdy_setting_pair, {
+    flags = 0   :: integer(),
+    id          :: integer(),
+    value       :: integer()
+}).
 -record(spdy_noop, {
     version = 2 :: integer()
 }).

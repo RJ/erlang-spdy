@@ -311,8 +311,8 @@ stream_error(Err, #stream{id=Id}, State = #state{}) ->
 
 
 apply_settings(Settings, State = #state{settings=OldSettings}) ->
-    NewSettings = lists:foldl(fun({Id, {Flags, Value}}, Acc) ->
-        [ {Id, {Flags, Value}} | proplists:delete(Id, Acc) ]
+    NewSettings = lists:foldl(fun(#spdy_setting_pair{id=Id, flags=Flags, value=Value}, Acc) ->
+        [ #spdy_setting_pair{id=Id, flags=Flags, value=Value} | proplists:delete(Id, Acc) ]
     end, OldSettings, Settings),
     ?LOG("SETTINGS FOR THIS SESSION: ~p",[NewSettings]),
     State#state{settings=NewSettings}.

@@ -37,9 +37,12 @@ init(_Id, Headers, SpdyOpts) ->
             case Url of
                 <<"/settings-me">> ->
                     %% invent some settings to save
-                    Settings = [ 
-                                 {?SETTINGS_ROUND_TRIP_TIME,        { ?SETTINGS_FLAG_PERSIST_VALUE, 42}},
-                                 {?SETTINGS_MAX_CONCURRENT_STREAMS, { ?SETTINGS_FLAG_PERSIST_VALUE, 9999 }}
+                    Settings = [#spdy_setting_pair{id=?SETTINGS_ROUND_TRIP_TIME,
+                                                   flags=?SETTINGS_FLAG_PERSIST_VALUE,
+                                                   value=42},
+                                #spdy_setting_pair{id=?SETTINGS_MAX_CONCURRENT_STREAMS,
+                                                   flags=?SETTINGS_FLAG_PERSIST_VALUE,
+                                                   value=9999}
                                ],
                     F = #spdy_settings{ flags=?SETTINGS_FLAG_CLEAR_PREVIOUSLY_PERSISTED_SETTINGS, settings=Settings},
                     espdy_stream:send_frame(self(), F),
