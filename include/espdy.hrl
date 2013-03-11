@@ -1,9 +1,5 @@
 -define(LOG(S,A), io:format("~p\t" ++ S ++"\n",[self()|A])).
 
-%% only support this version atm
-%% in future, we'll use the version claimed by the client and remove this:
--define(SPDY_VERSION, 2).
-
 %% DATA FRAMES:
 -record(spdy_data, {
     streamid :: integer(),
