@@ -78,14 +78,24 @@ parse_control_frame(V=3, ?SYN_STREAM, Flags, _Length,
                      slot=Slot,
                      headers=Headers};
 
-parse_control_frame(V, ?SYN_REPLY, Flags, _Length,
+parse_control_frame(V=2, ?SYN_REPLY, Flags, _Length,
                     << _:1, StreamID:31/big-unsigned-integer,
-                       NVPairsData/binary >>, Z) when V =:= 2; V =:= 3 ->
+                       _Unused:16/binary-unit:1,
+                       NVPairsData/binary >>, Z) ->
     Headers = parse_name_val_header(V, NVPairsData, Z),
     #spdy_syn_reply{version=V,
                     flags=Flags,
                     streamid=StreamID,
-                    headers=Headers}; 
+                    headers=Headers};
+
+parse_control_frame(V=3, ?SYN_REPLY, Flags, _Length,
+                    << _:1, StreamID:31/big-unsigned-integer,
+                       NVPairsData/binary >>, Z) ->
+    Headers = parse_name_val_header(V, NVPairsData, Z),
+    #spdy_syn_reply{version=V,
+                    flags=Flags,
+                    streamid=StreamID,
+                    headers=Headers};
 
 parse_control_frame(V, ?RST_STREAM, Flags, _Length,
                     << _:1, StreamID:31/big-unsigned-integer,
@@ -202,13 +212,21 @@ build_frame(#spdy_headers{   version = Version = 3,
     bcf(Version, ?HEADERS, Flags, << 0:1, StreamID:31/big-unsigned-integer,
                                      NVData/binary >>);
 
-build_frame(#spdy_syn_reply{ version = Version,
+build_frame(#spdy_syn_reply{ version = Version = 2,
                              flags=Flags,
                              streamid=StreamID,
                              headers=Headers}, Z) ->
     NVData = encode_name_value_header(Version, Headers, Z),
     bcf(Version, ?SYN_REPLY, Flags, << 0:1, StreamID:31/big-unsigned-integer,
                                        0:16/unit:1, %% UNUSED
+                                       NVData/binary >>);
+
+build_frame(#spdy_syn_reply{ version = Version = 3,
+                             flags=Flags,
+                             streamid=StreamID,
+                             headers=Headers}, Z) ->
+    NVData = encode_name_value_header(Version, Headers, Z),
+    bcf(Version, ?SYN_REPLY, Flags, << 0:1, StreamID:31/big-unsigned-integer,
                                        NVData/binary >>);
 
 build_frame(#spdy_rst_stream{version = Version,

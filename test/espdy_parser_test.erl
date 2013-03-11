@@ -527,6 +527,96 @@ build_control_frame_headers_v3_test() ->
                           headers=Headers},
     ?assertEqual(Frame, build_and_parse_frame(3, Frame)).
 
+% SYN_REPLY Control Frame Layout (v2):
+% +----------------------------------+
+% |1|        2        |        2     |
+% +----------------------------------+
+% | Flags (8)  |  Length (24 bits)   |
+% +----------------------------------+
+% |X|          Stream-ID (31bits)    |
+% +----------------------------------+
+% | Unused        |                  |
+% +----------------                  |
+% |     Name/value header block      |
+% |              ...                 |
+parse_control_frame_syn_reply_v2_test() ->
+    Headers = [{<<"status">>,<<"GET">>},
+               {<<"version">>,<<"HTTP/1.1">>},
+               {<<"content-type">>,<<"text/html">>}],
+    Packed = pack_headers(2, Headers),
+    ControlFrameData = <<1:1,                                      % C
+                         2:15/big-unsigned-integer,                % Version
+                         2:16/big-unsigned-integer,                % Type
+                         1:8/big-unsigned-integer,                 % Flags
+                         (size(Packed)+6):24/big-unsigned-integer, % Length
+                         0:1, 432:31/big-unsigned-integer,         % Stream-ID
+                         0:16/big-unsigned-integer,                % Unused
+                         Packed/binary >>,                         % Name/value header block
+    DesiredControlFrame = #spdy_syn_reply{version=2,
+                                          flags=1,
+                                          streamid=432,
+                                          headers=Headers},
+    {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, new_zlib_context_inflate()),
+    ?assertEqual(DesiredControlFrame, ControlFrame).
+
+build_control_frame_syn_reply_v2_test() ->
+    Headers = [{<<"status">>,<<"GET">>},
+               {<<"version">>,<<"HTTP/1.1">>},
+               {<<"content-type">>,<<"text/html">>}],
+    Frame = #spdy_syn_reply{version=2,
+                            flags=1,
+                            streamid=432,
+                            headers=Headers},
+    ?assertEqual(Frame, build_and_parse_frame(2, Frame)).
+
+% SYN_REPLY Control Frame Layout (v3):
+% +------------------------------------+
+% |1|    version    |         2        |
+% +------------------------------------+
+% |  Flags (8)  |  Length (24 bits)    |
+% +------------------------------------+
+% |X|           Stream-ID (31bits)     |
+% +------------------------------------+
+% | Number of Name/Value pairs (int32) |   <+
+% +------------------------------------+    |
+% |     Length of name (int32)         |    | This section is the "Name/Value
+% +------------------------------------+    | Header Block", and is compressed.
+% |           Name (string)            |    |
+% +------------------------------------+    |
+% |     Length of value  (int32)       |    |
+% +------------------------------------+    |
+% |          Value   (string)          |    |
+% +------------------------------------+    |
+% |           (repeats)                |   <+
+parse_control_frame_syn_reply_v3_test() ->
+    Headers = [{<<":status">>,<<"GET">>},
+               {<<":version">>,<<"HTTP/1.1">>},
+               {<<"content-type">>,<<"text/html">>}],
+    Packed = pack_headers(3, Headers),
+    ControlFrameData = <<1:1,                                      % C
+                         3:15/big-unsigned-integer,                % Version
+                         2:16/big-unsigned-integer,                % Type
+                         1:8/big-unsigned-integer,                 % Flags
+                         (size(Packed)+2):24/big-unsigned-integer, % Length
+                         0:1, 432:31/big-unsigned-integer,         % Stream-ID
+                         Packed/binary >>,                         % Name/value header block
+    DesiredControlFrame = #spdy_syn_reply{version=3,
+                                          flags=1,
+                                          streamid=432,
+                                          headers=Headers},
+    {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, new_zlib_context_inflate()),
+    ?assertEqual(DesiredControlFrame, ControlFrame).
+
+build_control_frame_syn_reply_v3_test() ->
+    Headers = [{<<":status">>,<<"GET">>},
+               {<<":version">>,<<"HTTP/1.1">>},
+               {<<"content-type">>,<<"text/html">>}],
+    Frame = #spdy_syn_reply{version=3,
+                            flags=1,
+                            streamid=432,
+                            headers=Headers},
+    ?assertEqual(Frame, build_and_parse_frame(3, Frame)).
+
 % WINDOW_UPDATE Control Frame Layout (v3):
 % +----------------------------------+
 % |1|   version    |         9       |
