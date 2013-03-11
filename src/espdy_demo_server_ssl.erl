@@ -26,12 +26,11 @@ start(Port) when is_integer(Port) ->
 accept_loop(ListenSock) ->
     case ssl:transport_accept(ListenSock) of
         {ok, Sock} ->
-            case ssl:ssl_accept(Sock) of 
+            case ssl:ssl_accept(Sock) of
                 ok ->
                     {ok, Proto} = ssl:negotiated_next_protocol(Sock),
                     io:format("Negotiated next protocol: ~p\n",[Proto]),
                     SpdyVersion = spdy_version_from_proto(Proto),
-                    io:format("SPDY VERSION HERE: ~p\n", [SpdyVersion]),
                     Opts = [{spdy_version, SpdyVersion}], %% passed through to the stream callback module
                     {ok, Pid} = espdy_session:start_link(Sock, ssl, espdy_stream_http, Opts),
                     %% You must assign controlling process then send shoot, to notify
