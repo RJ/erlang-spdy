@@ -193,34 +193,16 @@ parse_control_frame_syn_stream_v2_raw_test() ->
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
 build_control_frame_syn_stream_v2_test() ->
-    Headers = [{<<"accept">>,
-                <<"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8">>},
-               {<<"host">>,<<"localhost:6121">>},
-               {<<"method">>,<<"GET">>},
-               {<<"scheme">>,<<"https">>},
+    Headers = [{<<"method">>,<<"GET">>},
                {<<"url">>,<<"/">>},
                {<<"version">>,<<"HTTP/1.1">>}],
-    ControlFrame = #spdy_syn_stream{version=2,
-                                    flags=2,
-                                    streamid=65,
-                                    associd=17,
-                                    priority=0,
-                                    headers=Headers},
-    PackedHeaders = pack_headers(2, Headers),
-    DataLength = size(PackedHeaders) + 10,
-    DesiredData = <<1:1,                                % C
-                    2:15/big-unsigned-integer,          % Version
-                    1:16/big-unsigned-integer,          % Type
-                    2:8/big-unsigned-integer,           % Flags
-                    DataLength:24/big-unsigned-integer, % Length
-                    0:1, 65:31/big-unsigned-integer,    % Stream-ID
-                    0:1, 17:31/big-unsigned-integer,    % Associated-To-Stream-ID
-                    0:2/big-unsigned-integer,           % Priority
-                    0:14/big-unsigned-integer,          % Unused
-                    PackedHeaders/binary >>,            % Name/value header block
-    Zdef = new_zlib_context_deflate(2),
-    ActualData = espdy_parser:build_frame(ControlFrame, Zdef),
-    ?assertEqual(DesiredData, ActualData).
+    Frame = #spdy_syn_stream{version=2,
+                             flags=1,
+                             streamid=65,
+                             associd=17,
+                             priority=0,
+                             headers=Headers},
+    ?assertEqual(Frame, build_and_parse_frame(2, Frame)).
 
 % SYN_STREAM Control Frame Layout (v3):
 % +------------------------------------+
@@ -299,29 +281,14 @@ build_control_frame_syn_stream_v3_test() ->
     Headers = [{<<":method">>,<<"GET">>},
                {<<":path">>,<<"/hello_world">>},
                {<<":version">>,<<"HTTP/1.1">>}],
-    ControlFrame = #spdy_syn_stream{version=3,
-                                    flags=2,
-                                    streamid=65,
-                                    associd=17,
-                                    priority=7,
-                                    slot=0,
-                                    headers=Headers},
-    PackedHeaders = pack_headers(3, Headers),
-    DataLength = size(PackedHeaders) + 10,
-    DesiredData = <<1:1,                                % C
-                    3:15/big-unsigned-integer,          % Version
-                    1:16/big-unsigned-integer,          % Type
-                    2:8/big-unsigned-integer,           % Flags
-                    DataLength:24/big-unsigned-integer, % Length
-                    0:1, 65:31/big-unsigned-integer,    % Stream-ID
-                    0:1, 17:31/big-unsigned-integer,    % Associated-To-Stream-ID
-                    7:3/big-unsigned-integer,           % Priority
-                    0:5/big-unsigned-integer,           % Unused
-                    0:8/big-unsigned-integer,           % Slot
-                    PackedHeaders/binary >>,            % Name/value header block
-    Zdef = new_zlib_context_deflate(3),
-    ActualData = espdy_parser:build_frame(ControlFrame, Zdef),
-    ?assertEqual(DesiredData, ActualData).
+    Frame = #spdy_syn_stream{version=3,
+                             flags=2,
+                             streamid=65,
+                             associd=17,
+                             priority=7,
+                             slot=0,
+                             headers=Headers},
+    ?assertEqual(Frame, build_and_parse_frame(3, Frame)).
 
 % PING Control Frame Layout (v2/v3):
 % +----------------------------------+
@@ -352,6 +319,14 @@ parse_control_frame_ping_v3_test() ->
     DesiredControlFrame = #spdy_ping{version=3, id=12345},
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
+
+build_control_frame_ping_v2_test() ->
+    Frame = #spdy_ping{version=2, id=12345},
+    ?assertEqual(Frame, build_and_parse_frame(2, Frame)).
+
+build_control_frame_ping_v3_test() ->
+    Frame = #spdy_ping{version=3, id=12345},
+    ?assertEqual(Frame, build_and_parse_frame(3, Frame)).
 
 % RST_STREAM Control Frame Layout (v2/v3):
 % +----------------------------------+
@@ -393,6 +368,20 @@ parse_control_frame_rst_stream_v3_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
+build_control_frame_rst_stream_v2_test() ->
+    Frame = #spdy_rst_stream{version=2,
+                             flags=0,
+                             streamid=543,
+                             statuscode=11},
+    ?assertEqual(Frame, build_and_parse_frame(2, Frame)).
+
+build_control_frame_rst_stream_v3_test() ->
+    Frame = #spdy_rst_stream{version=3,
+                             flags=0,
+                             streamid=543,
+                             statuscode=11},
+    ?assertEqual(Frame, build_and_parse_frame(3, Frame)).
+
 % GOAWAY Control Frame Layout (v2):
 % +----------------------------------+
 % |1|       2          |       7     |
@@ -412,6 +401,11 @@ parse_control_frame_goaway_v2_test() ->
                                        lastgoodid=543},
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
+
+build_control_frame_goaway_v2_test() ->
+    Frame = #spdy_goaway{version=2,
+                         lastgoodid=543},
+    ?assertEqual(Frame, build_and_parse_frame(2, Frame)).
 
 % GOAWWAY Control Frame Layout (v3):
 % +----------------------------------+
@@ -436,6 +430,12 @@ parse_control_frame_goaway_v3_test() ->
                                        statuscode=2},
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
+
+build_control_frame_goaway_v3_test() ->
+    Frame = #spdy_goaway{version=3,
+                         lastgoodid=543,
+                         statuscode=2},
+    ?assertEqual(Frame, build_and_parse_frame(3, Frame)).
 
 % HEADERS Control Frame Layout (v2):
 % +----------------------------------+
@@ -468,6 +468,16 @@ parse_control_frame_headers_v2_test() ->
                                         headers=Headers},
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, new_zlib_context_inflate()),
     ?assertEqual(DesiredControlFrame, ControlFrame).
+
+build_control_frame_headers_v2_test() ->
+    Headers = [{<<"method">>,<<"GET">>},
+               {<<"url">>,<<"/">>},
+               {<<"version">>,<<"HTTP/1.1">>}],
+    Frame = #spdy_headers{version=2,
+                          flags=1,
+                          streamid=432,
+                          headers=Headers},
+    ?assertEqual(Frame, build_and_parse_frame(2, Frame)).
 
 % HEADERS Control Frame Layout (v3):
 % +------------------------------------+
@@ -507,6 +517,16 @@ parse_control_frame_headers_v3_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, new_zlib_context_inflate()),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
+build_control_frame_headers_v3_test() ->
+    Headers = [{<<":method">>,<<"GET">>},
+               {<<":url">>,<<"/">>},
+               {<<":version">>,<<"HTTP/1.1">>}],
+    Frame = #spdy_headers{version=3,
+                          flags=1,
+                          streamid=432,
+                          headers=Headers},
+    ?assertEqual(Frame, build_and_parse_frame(3, Frame)).
+
 % WINDOW_UPDATE Control Frame Layout (v3):
 % +----------------------------------+
 % |1|   version    |         9       |
@@ -530,6 +550,12 @@ parse_control_frame_window_update_v3_test() ->
                                               delta_size=999},
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, <<>>),
     ?assertEqual(DesiredControlFrame, ControlFrame).
+
+build_control_frame_window_update_v3_test() ->
+    Frame = #spdy_window_update{version=3,
+                                streamid=835,
+                                delta_size=999},
+    ?assertEqual(Frame, build_and_parse_frame(3, Frame)).
 
 %% =========================================================
 %% Header encoding tests
@@ -558,6 +584,13 @@ encode_name_value_header_v3_test() ->
 %% =========================================================
 %% Helpers
 %% =========================================================
+
+build_and_parse_frame(Version, Frame) ->
+    Zdef = new_zlib_context_deflate(Version),
+    CFData = espdy_parser:build_frame(Frame, Zdef),
+    Zinf = new_zlib_context_inflate(),
+    {FrameParsed, _Z} = espdy_parser:parse_frame(CFData, Zinf),
+    FrameParsed.
 
 pack_headers(Version, Headers) when Version =:= 2; Version =:= 3 ->
     Zdef = new_zlib_context_deflate(Version),

@@ -185,6 +185,23 @@ build_frame(#spdy_syn_stream{version = Version = 3,
                                         Slot:8/big-unsigned-integer,
                                         NVData/binary >>);
 
+build_frame(#spdy_headers{   version = Version = 2,
+                             flags=Flags,
+                             streamid=StreamID,
+                             headers=Headers}, Z) ->
+    NVData = encode_name_value_header(Version, Headers, Z),
+    bcf(Version, ?HEADERS, Flags, << 0:1, StreamID:31/big-unsigned-integer,
+                                     0:16/unit:1, %% UNUSED
+                                     NVData/binary >>);
+
+build_frame(#spdy_headers{   version = Version = 3,
+                             flags=Flags,
+                             streamid=StreamID,
+                             headers=Headers}, Z) ->
+    NVData = encode_name_value_header(Version, Headers, Z),
+    bcf(Version, ?HEADERS, Flags, << 0:1, StreamID:31/big-unsigned-integer,
+                                     NVData/binary >>);
+
 build_frame(#spdy_syn_reply{ version = Version,
                              flags=Flags,
                              streamid=StreamID,
@@ -205,14 +222,26 @@ build_frame(#spdy_ping{      version = Version,
                              id=PingID}, _Z) ->
     bcf(Version, ?PING, 0, << PingID:32/big-unsigned-integer >>);
 
-build_frame(#spdy_goaway{    version = Version,
+build_frame(#spdy_goaway{    version = Version = 2,
                              lastgoodid=LGI}, _Z) ->
     bcf(Version, ?GOAWAY, 0, << 0:1, LGI:31/big-unsigned-integer >>);
+
+build_frame(#spdy_goaway{    version = Version = 3,
+                             lastgoodid=LGI,
+                             statuscode=StatusCode}, _Z) ->
+    bcf(Version, ?GOAWAY, 0, << 0:1, LGI:31/big-unsigned-integer,
+                                StatusCode:32/big-unsigned-integer >>);
 
 build_frame(#spdy_settings{  version = Version,
                              flags = Flags,
                              settings = Settings }, _Z) ->
-    bcf(Version, ?SETTINGS, Flags, encode_settings(Settings)).
+    bcf(Version, ?SETTINGS, Flags, encode_settings(Settings));
+
+build_frame(#spdy_window_update{version = Version = 3,
+                                streamid=StreamID,
+                                delta_size=DeltaWindowSize}, _Z) ->
+    bcf(Version, ?WINDOW_UPDATE, 0, << 0:1, StreamID:31/big-unsigned-integer,
+                                       0:1, DeltaWindowSize:31/big-unsigned-integer >>).
 
 %% TODO not implemented build_frame for all types yet
 
