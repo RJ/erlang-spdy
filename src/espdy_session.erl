@@ -101,7 +101,7 @@ handle_info({ssl, Sock, Data}, State) ->
 handle_info({tcp, Socket, Data}, State = #state{socket=Socket, transport=Transport, buffer=Buffer}) ->
     ?LOG("INCDATA: ~p\n", [Data]),
     Ret = process_buffer(State#state{buffer = <<Buffer/binary, Data/binary>>}),
-    case Transport of 
+    case Transport of
         gen_tcp -> inet:setopts(Socket, [{active,once}]);
         ssl     -> ssl:setopts(Socket, [{active,once}])
     end,
@@ -177,22 +177,22 @@ handle_frame(#spdy_syn_stream{  flags=Flags,
     %% If the client is initiating the stream, the Stream-ID must be odd.
     %% 0 is not a valid Stream-ID. Stream-IDs from each side of the connection
     %% must increase monotonically as new streams are created.
-    case StreamID =:= 0 orelse 
+    case StreamID =:= 0 orelse
          StreamID rem 2 =:= 0 orelse
          StreamID =< State#state.last_client_sid of
         true -> session_error(protocol_error, State);
         false -> ok
     end,
-    %% It is a protocol error to send two SYN_STREAMS with the same stream-id. 
+    %% It is a protocol error to send two SYN_STREAMS with the same stream-id.
     %% If a recipient receives a second SYN_STREAM for the same stream, it MUST issue a stream error with the status code PROTOCOL_ERROR.
     case lookup_stream(StreamID, State) of
-        S = #stream{} -> 
+        S = #stream{} ->
             stream_error(protocol_error, S, State),
             State;
-        undefined -> 
-           {ok, Pid} = espdy_stream:start_link(StreamID, 
-                                               self(), 
-                                               Headers, 
+        undefined ->
+           {ok, Pid} = espdy_stream:start_link(StreamID,
+                                               self(),
+                                               Headers,
                                                State#state.cbmod,
                                                State#state.spdy_opts),
             %% TODO pass fin into startlink?
@@ -210,17 +210,23 @@ handle_frame(#spdy_syn_stream{  flags=Flags,
                                   },
             NewState
     end;
+handle_frame(#spdy_syn_stream{version=FrameVersion,
+                              streamid=StreamID},
+             State=#state{spdy_version=SessionVersion}) ->
+    ?LOG("STREAM VERSION: ~p, SESSION VERSION: ~p", [FrameVersion, SessionVersion]),
+    stream_error(unsupported_version, #stream{id=StreamID}, State),
+    State;
 
 handle_frame(#spdy_syn_reply{ flags = Flags,
                                       streamid = StreamID,
                                       headers=_H }, State=#state{}) ->
     case lookup_stream(StreamID, State) of
-        undefined -> 
+        undefined ->
             session_error(protocol_error, State), %% TODO what sort of error?
             State;
         S = #stream{syn_replied=true} ->
             %% If an endpoint receives multiple SYN_REPLY frames for the same
-            %% active stream ID, it MUST issue a stream error (Section 2.4.2) 
+            %% active stream ID, it MUST issue a stream error (Section 2.4.2)
             %% with the error code STREAM_IN_USE.
             stream_error(stream_in_use, S, State),
             State;
@@ -232,7 +238,7 @@ handle_frame(#spdy_syn_reply{ flags = Flags,
             NewState
     end;
 
-handle_frame(#spdy_rst_stream{ streamid=StreamID, 
+handle_frame(#spdy_rst_stream{ streamid=StreamID,
                                        statuscode=StatusCode }, State=#state{}) ->
     Status = espdy_parser:status_code_to_atom(StatusCode),
     ?LOG("RST_STREAM ~p status: ~p",[StreamID, Status]),
@@ -246,7 +252,7 @@ handle_frame(#spdy_rst_stream{ streamid=StreamID,
             NewState
     end;
 
-handle_frame(#spdy_settings{ flags=_Flags, 
+handle_frame(#spdy_settings{ flags=_Flags,
                              settings=Settings }, State=#state{}) ->
     NewState = apply_settings( Settings, State),
     NewState;
@@ -255,7 +261,7 @@ handle_frame(#spdy_noop{}, State) ->
     State;
 
 handle_frame(F=#spdy_ping{}, State=#state{}) ->
-    socket_write(F, State), 
+    socket_write(F, State),
     State;
 
 handle_frame(#spdy_goaway{lastgoodid=_LastGoodStreamID}, State=#state{}) ->
@@ -288,7 +294,7 @@ handle_frame(#spdy_data{ streamid=StreamID,
     case lookup_stream(StreamID, State) of
         undefined ->
             F = #spdy_rst_stream{version=State#state.spdy_version,
-                                 streamid=StreamID, 
+                                 streamid=StreamID,
                                  statuscode=?INVALID_STREAM},
             socket_write(F, State),
             State;
