@@ -398,23 +398,29 @@ encode_name_value_header(_Version = 3, Headers, Z) when is_list(Headers) ->
 
 
  %% Various conversions for nicer debugging and matching:
-atom_to_status_code(protocol_error)         -> 1;
-atom_to_status_code(invalid_stream)         -> 2;
-atom_to_status_code(refused_stream)         -> 3;
-atom_to_status_code(unsupported_version)    -> 4;
-atom_to_status_code(cancel)                 -> 5;
-atom_to_status_code(flow_control_error)     -> 6;
-atom_to_status_code(stream_in_use)          -> 7;
-atom_to_status_code(stream_already_closed ) -> 8.
+atom_to_status_code(protocol_error)        -> 1;
+atom_to_status_code(invalid_stream)        -> 2;
+atom_to_status_code(refused_stream)        -> 3;
+atom_to_status_code(unsupported_version)   -> 4;
+atom_to_status_code(cancel)                -> 5;
+atom_to_status_code(internal_error)        -> 6;
+atom_to_status_code(flow_control_error)    -> 7;
+atom_to_status_code(stream_in_use)         -> 8;
+atom_to_status_code(stream_already_closed) -> 9;
+atom_to_status_code(invalid_credentials)   -> 10;
+atom_to_status_code(frame_too_large)       -> 11.
 
 status_code_to_atom(1)  -> protocol_error;
 status_code_to_atom(2)  -> invalid_stream;
 status_code_to_atom(3)  -> refused_stream;
 status_code_to_atom(4)  -> unsupported_version;
 status_code_to_atom(5)  -> cancel;
-status_code_to_atom(6)  -> flow_control_error;
-status_code_to_atom(7)  -> stream_in_use;
-status_code_to_atom(8)  -> stream_already_closed.
+status_code_to_atom(6)  -> internal_error;
+status_code_to_atom(7)  -> flow_control_error;
+status_code_to_atom(8)  -> stream_in_use;
+status_code_to_atom(9)  -> stream_already_closed;
+status_code_to_atom(10) -> invalid_credentials;
+status_code_to_atom(11) -> frame_too_large.
 
 type_to_atom(?SYN_STREAM)   -> syn_stream;
 type_to_atom(?SYN_REPLY)    -> syn_reply;
