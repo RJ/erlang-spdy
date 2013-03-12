@@ -1,4 +1,4 @@
-Erlang SPDY 
+Erlang SPDY
 ===========
 
 This is a library application designed to make it easy to add SPDY support to
@@ -12,30 +12,45 @@ To run the demo server:
 
     $ rebar compile                            # compile everything
     $ erl -pa ebin/ -boot start_sasl -s espdy  # espdy app doesn't run anything
-    erl> espdy_demo_server:start(6121, false). # start server, non-ssl
+    erl> espdy_demo_server:start(6121, false). # start server, non-SSL (SPDY/2 only), OR
+    erl> espdy_demo_server_ssl:start(6121).    # start server, SSL (SPDY/3 and SPDY/2)
+
+Please note that you should be running Erlang OTP R16B or later, as that was the
+first release that included the TLS Next Protocol Negotiation (NPN)
+functionality.
 
 Current Status
 --------------
 
-The demo serves up a nice hardcoded page, and can handle a SPDY v2 session
-properly to chrome.
+The SSL demo server serves up a hardcoded page, and advertises NPN support for
+SPDY/3 and SPDY/2. It can serve either of these versions to Chrome or another
+compatible SPDY client.
 
-No flow control, although that got pushed into SPDY/3 anyway
+The non-SSL demo server serves up the same hardcoded page, but only supports
+SPDY v2 sessions at the moment. This is because [a bug in Chrome][chrome-bug]
+causes it to only use SPDY/2 in non-SSL mode.
+
+There is no flow control, although that got pushed into SPDY/3 anyway.
 
 Probably some other stuff to mention here.
+
+[chrome-bug]: https://code.google.com/p/chromium/issues/detail?id=181598 "SPDY sans SSL in Chrome"
 
 Testing SPDY with Chrome
 ------------------------
 
 Run Chrome with these flags:
 
+    # Non-SSL mode
     --use-spdy=no-ssl --new-window --user-data-dir=/tmp/foo
+    # Or, with NPN/SSL:
+    --use-spdy=ssl --new-window --user-data-dir=/tmp/foo
 
-This will open a new chrome window:
+This will open a new Chrome window:
 
 * with a new chrome profile, ignoring your existing settings
 * in SPDY-only mode - sites using normal HTTP will not load
-* force SPDY to not use SSL, for simpler testing
+* force SPDY to not use SSL, for simpler testing (if you've opted for `no-ssl`)
 
 Now go to `http://localhost:6121/` in the new Chrome window.
 
@@ -46,10 +61,10 @@ started with --use-spdy=ssl
 
 
 ### OS X example
-    /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --use-spdy=no-ssl --new-window --user-data-dir=/tmp/foo http://localhost:6121/ 
+    /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --use-spdy=no-ssl --new-window --user-data-dir=/tmp/foo http://localhost:6121/
 
 ### Linux example
-    chromium-browser --use-spdy=no-ssl --new-window --user-data-dir=/tmp/foo  http://localhost:6121/ 
+    chromium-browser --use-spdy=no-ssl --new-window --user-data-dir=/tmp/foo  http://localhost:6121/
 
 Erlang SPDY Design Notes
 ------------------------
@@ -67,12 +82,24 @@ Two zlib contexts are maintained for each session. For inflating and deflating.
 `espdy_parser` takes care of all the binary-to-record work and visa-versa, and
 requires a compression context to use.
 
+As with other SPDY implementations, the server does not allow frames with
+different SPDY versions to be sent on the same session. The server will
+terminate the stream or session with the appropriate error message if a frame
+version mismatch is encountered.
+
+### Tests
+
+[EUnit tests][parser-tests] are provided to verify the correct behavior of all
+binary encoding and decoding. However, there are not yet any tests for the
+session or stream management logic.
+
+[parser-tests]: https://github.com/RJ/erlang-spdy/blob/master/test/espdy_parser_test.erl "espdy_parser EUnit Tests"
+
 SPDY Resources
 --------------
 http://dev.chromium.org/spdy
 
-Chrome supports SPDY v2 spec currently: 
+Chrome supports SPDY v2 and v3 specs currently:
 
 * http://dev.chromium.org/spdy/spdy-protocol/spdy-protocol-draft2
-
-SPDY v3 is being specced, but is not in the wild yet afaik.
+* http://dev.chromium.org/spdy/spdy-protocol/spdy-protocol-draft3
