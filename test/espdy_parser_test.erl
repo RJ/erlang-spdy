@@ -682,6 +682,41 @@ encode_name_value_header_v3_test() ->
     ?assertEqual(Desired, Packed).
 
 %% =========================================================
+%% Header decoding tests
+%% =========================================================
+parse_name_val_pairs_v2_test() ->
+    RawHeaderData = <<6:16/big-unsigned-integer, % Length of Name (Header 1)
+                      <<"method">>/binary,       % Name
+                      3:16/big-unsigned-integer, % Length of Value
+                      <<"GET">>/binary >>,       % Value
+    Result = espdy_parser:parse_name_val_pairs(2, 1, RawHeaderData, []),
+    ?assertEqual([{<<"method">>,<<"GET">>}], Result).
+
+parse_name_val_pairs_v2_zero_length_name_test() ->
+    RawHeaderData = <<0:16/big-unsigned-integer, % Length of Name (Header 1)
+                      <<"">>/binary,             % Name
+                      3:16/big-unsigned-integer, % Length of Value
+                      <<"GET">>/binary >>,       % Value
+    Result = espdy_parser:parse_name_val_pairs(2, 1, RawHeaderData, []),
+    ?assertEqual({error, stream_protocol_error}, Result).
+
+parse_name_val_pairs_v2_zero_length_value_test() ->
+    RawHeaderData = <<6:16/big-unsigned-integer, % Length of Name (Header 1)
+                      <<"method">>/binary,       % Name
+                      0:16/big-unsigned-integer, % Length of Value
+                      <<"">>/binary >>,          % Empty Value
+    Result = espdy_parser:parse_name_val_pairs(2, 1, RawHeaderData, []),
+    ?assertEqual({error, stream_protocol_error}, Result).
+
+parse_name_val_pairs_v2_consecutive_nuls_test() ->
+    RawHeaderData = <<6:16/big-unsigned-integer,     % Length of Name (Header 1)
+                      <<"method">>/binary,           % Name
+                      8:16/big-unsigned-integer,     % Length of Value
+                      <<"omg",0,0,"wtf">>/binary >>, % Empty Value
+    Result = espdy_parser:parse_name_val_pairs(2, 1, RawHeaderData, []),
+    ?assertEqual({error, stream_protocol_error}, Result).
+
+%% =========================================================
 %% Helpers
 %% =========================================================
 

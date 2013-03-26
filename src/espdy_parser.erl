@@ -292,20 +292,49 @@ parse_name_val_header(Version = 3, Bin, Z) ->
 
 parse_name_val_pairs(_V, 0, _, Acc) ->
     lists:reverse(Acc);
+
+%% Don't allow 0-length header names
+parse_name_val_pairs(_Version = 2, _Num, << 0:16/big-unsigned-integer,
+                     ValLen:16/big-unsigned-integer,
+                     _Val:ValLen/binary,
+                     _Rest/binary >>, _Acc) ->
+    {error, stream_protocol_error};
+%% Don't allow 0-length header values
+parse_name_val_pairs(_Version = 2, _Num, << NameLen:16/big-unsigned-integer,
+                     _Name:NameLen/binary,
+                     0:16/big-unsigned-integer,
+                     _Rest/binary >>, _Acc) ->
+    {error, stream_protocol_error};
 parse_name_val_pairs(Version = 2, Num, << NameLen:16/big-unsigned-integer,
                      Name:NameLen/binary,
                      ValLen:16/big-unsigned-integer,
                      Val:ValLen/binary,
                      Rest/binary >>, Acc) ->
-    %% TODO validate and throw errors as per 2.6.9
-    Pair = {Name, Val},
-    parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
+    %% Don't allow consecutive nuls
+    case binary:match(Val, <<0,0>>) of
+        nomatch ->
+            Pair = {Name, Val},
+            parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
+        _ ->
+            {error, stream_protocol_error}
+    end;
+
 parse_name_val_pairs(Version = 3, Num, << NameLen:32/big-unsigned-integer,
                      Name:NameLen/binary,
                      ValLen:32/big-unsigned-integer,
                      Val:ValLen/binary,
                      Rest/binary >>, Acc) ->
-    %% TODO validate and throw errors as per 2.6.9
+    %% TODO validate and throw errors as per 2.6.10. To validate:
+    %% * Names must be lowercase ASCII
+    %% * Length of each name must be > 0
+    %% * Unique per header block, no duplicates
+    %% * Values must be either empty (length=0) or contain multiple,
+    %%   NUL-separated values, each with length > 0. No in-sequence NUL chars.
+    %% * Values cannot start or end with a NUL character
+    %% * Not sure on charset for Values (also ASCII ?)
+    %%
+    %% If any of these validations fail, issue a stream error with status code
+    %% PROTOCOL_ERROR with the stream-id.
     Pair = {Name, Val},
     parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]).
 
