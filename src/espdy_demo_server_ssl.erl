@@ -7,7 +7,6 @@ start(Port) when is_integer(Port) ->
     ok = ssl:start(),
     spawn_link(fun() ->
         {ok, Listen} = ssl:listen(Port, [
-            %% Requires patched SSL:
             {next_protocols_advertised, [<<"spdy/3">>, <<"spdy/2">>, <<"http/1.0">>, <<"http/1.1">>]},
             {keyfile, "server.key"},
             {certfile, "server.crt"},
