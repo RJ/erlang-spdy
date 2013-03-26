@@ -692,6 +692,14 @@ parse_name_val_pairs_v2_test() ->
     Result = espdy_parser:parse_name_val_pairs(2, 1, RawHeaderData, []),
     ?assertEqual([{<<"method">>,<<"GET">>}], Result).
 
+parse_name_val_pairs_v2_multiple_values_test() ->
+    RawHeaderData = <<15:16/big-unsigned-integer,                             % Length of Name (Header 1)
+                      <<"x-forwarded-for">>/binary,                           % Name
+                      26:16/big-unsigned-integer,                             % Length of Value
+                      <<"1.2.3.4", 0, "5.6.7.8", 0, "9.10.11.12">>/binary >>, % Value
+    Result = espdy_parser:parse_name_val_pairs(2, 1, RawHeaderData, []),
+    ?assertEqual([{<<"x-forwarded-for">>,[<<"1.2.3.4">>, <<"5.6.7.8">>, <<"9.10.11.12">>]}], Result).
+
 parse_name_val_pairs_v2_zero_length_name_test() ->
     RawHeaderData = <<0:16/big-unsigned-integer, % Length of Name (Header 1)
                       <<"">>/binary,             % Name

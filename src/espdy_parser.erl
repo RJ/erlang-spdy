@@ -310,13 +310,20 @@ parse_name_val_pairs(Version = 2, Num, << NameLen:16/big-unsigned-integer,
                      ValLen:16/big-unsigned-integer,
                      Val:ValLen/binary,
                      Rest/binary >>, Acc) ->
-    %% Don't allow consecutive nuls
-    case binary:match(Val, <<0,0>>) of
+    case binary:match(Val, <<0>>) of
         nomatch ->
             Pair = {Name, Val},
             parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
         _ ->
-            {error, stream_protocol_error}
+            case binary:match(Val, <<0,0>>) of
+                nomatch ->
+                    % Split multiple header values on nul
+                    Pair = {Name, binary:split(Val, <<0>>, [global])},
+                    parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
+                _ ->
+                    %% Don't allow consecutive nuls
+                    {error, stream_protocol_error}
+            end
     end;
 
 parse_name_val_pairs(Version = 3, Num, << NameLen:32/big-unsigned-integer,
