@@ -733,6 +733,18 @@ parse_name_val_pairs_v2_consecutive_nuls_test() ->
     Result = espdy_parser:parse_name_val_pairs(2, 1, RawHeaderData, []),
     ?assertEqual({error, stream_protocol_error}, Result).
 
+parse_name_val_pairs_v2_duplicate_header_names_test() ->
+    RawHeaderData = <<6:16/big-unsigned-integer,     % Length of Name (Header 1)
+                      <<"method">>/binary,           % Name
+                      3:16/big-unsigned-integer,     % Length of Value
+                      <<"omg">>/binary,              % Value
+                      6:16/big-unsigned-integer,     % Length of Name (dupe of Header 1)
+                      <<"method">>/binary,           % Name
+                      3:16/big-unsigned-integer,     % Length of Value
+                      <<"wtf">>/binary >>,           % Value
+    Result = espdy_parser:parse_name_val_pairs(2, 2, RawHeaderData, []),
+    ?assertEqual({error, stream_protocol_error}, Result).
+
 parse_name_val_pairs_v3_test() ->
     RawHeaderData = <<7:32/big-unsigned-integer, % Length of Name (Header 1)
                       <<":method">>/binary,      % Name
@@ -780,6 +792,18 @@ parse_name_val_pairs_v3_consecutive_nuls_test() ->
                       8:32/big-unsigned-integer,     % Length of Value
                       <<"omg",0,0,"wtf">>/binary >>, % Invalid Value (consecutive NULs)
     Result = espdy_parser:parse_name_val_pairs(3, 1, RawHeaderData, []),
+    ?assertEqual({error, stream_protocol_error}, Result).
+
+parse_name_val_pairs_v3_duplicate_header_names_test() ->
+    RawHeaderData = <<6:32/big-unsigned-integer,     % Length of Name (Header 1)
+                      <<"method">>/binary,           % Name
+                      3:32/big-unsigned-integer,     % Length of Value
+                      <<"omg">>/binary,              % Value
+                      6:32/big-unsigned-integer,     % Length of Name (dupe of Header 1)
+                      <<"method">>/binary,           % Name
+                      3:32/big-unsigned-integer,     % Length of Value
+                      <<"wtf">>/binary >>,           % Value
+    Result = espdy_parser:parse_name_val_pairs(3, 2, RawHeaderData, []),
     ?assertEqual({error, stream_protocol_error}, Result).
 
 %% =========================================================

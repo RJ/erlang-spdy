@@ -315,21 +315,28 @@ parse_name_val_pairs(Version = 2, Num, << NameLen:16/big-unsigned-integer,
         % Unsure about this, spec is not clear
         invalid -> {error, stream_protocol_error};
         ok ->
-            case binary:match(Val, <<0>>) of
-                nomatch ->
-                    Pair = {Name, Val},
-                    parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
-                _ ->
-                    %% No consecutive NULs in value
-                    case binary:match(Val, <<0,0>>) of
+            %% Check if we already received a header with that name
+            case lists:keyfind(Name, 1, Acc) of
+                false ->
+                    %% Check if this is a multi-value list (NUL-separated)
+                    case binary:match(Val, <<0>>) of
                         nomatch ->
-                            %% Split multiple header values on NUL
-                            Pair = {Name, binary:split(Val, <<0>>, [global])},
+                            Pair = {Name, Val},
                             parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
                         _ ->
-                            %% Don't allow consecutive nuls
-                            {error, stream_protocol_error}
-                    end
+                            %% No consecutive NULs in value
+                            case binary:match(Val, <<0,0>>) of
+                                nomatch ->
+                                    %% Split multiple header values on NUL
+                                    Pair = {Name, binary:split(Val, <<0>>, [global])},
+                                    parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
+                                _ ->
+                                    %% Don't allow consecutive nuls
+                                    {error, stream_protocol_error}
+                            end
+                    end;
+                %% Duplicate header name, return error
+                _ -> {error, stream_protocol_error}
             end
     end;
 
@@ -362,18 +369,24 @@ parse_name_val_pairs(Version = 3, Num, << NameLen:32/big-unsigned-integer,
         % Unsure about this, spec is not clear
         invalid -> {error, stream_protocol_error};
         ok ->
-            case binary:match(Val, <<0>>) of
-                nomatch ->
-                    Pair = {Name, Val},
-                    parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
-                _ ->
-                    Vals = binary:split(Val, <<0>>, [global]),
-                    case validate_header_values(Version, Vals) of
-                        invalid -> {error, stream_protocol_error};
-                        ok ->
-                            Pair = {Name, Vals},
-                            parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc])
-                    end
+            %% Check if we already received a header with that name
+            case lists:keyfind(Name, 1, Acc) of
+                false ->
+                    case binary:match(Val, <<0>>) of
+                        nomatch ->
+                            Pair = {Name, Val},
+                            parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
+                        _ ->
+                            Vals = binary:split(Val, <<0>>, [global]),
+                            case validate_header_values(Version, Vals) of
+                                invalid -> {error, stream_protocol_error};
+                                ok ->
+                                    Pair = {Name, Vals},
+                                    parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc])
+                            end
+                    end;
+                %% Duplicate header name, return error
+                _ -> {error, stream_protocol_error}
             end
     end.
 
