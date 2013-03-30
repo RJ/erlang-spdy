@@ -729,8 +729,57 @@ parse_name_val_pairs_v2_consecutive_nuls_test() ->
     RawHeaderData = <<6:16/big-unsigned-integer,     % Length of Name (Header 1)
                       <<"method">>/binary,           % Name
                       8:16/big-unsigned-integer,     % Length of Value
-                      <<"omg",0,0,"wtf">>/binary >>, % Empty Value
+                      <<"omg",0,0,"wtf">>/binary >>, % Invalid Value (consecutive NULs)
     Result = espdy_parser:parse_name_val_pairs(2, 1, RawHeaderData, []),
+    ?assertEqual({error, stream_protocol_error}, Result).
+
+parse_name_val_pairs_v3_test() ->
+    RawHeaderData = <<7:32/big-unsigned-integer, % Length of Name (Header 1)
+                      <<":method">>/binary,      % Name
+                      3:32/big-unsigned-integer, % Length of Value
+                      <<"GET">>/binary >>,       % Value
+    Result = espdy_parser:parse_name_val_pairs(3, 1, RawHeaderData, []),
+    ?assertEqual([{<<":method">>,<<"GET">>}], Result).
+
+parse_name_val_pairs_v3_multiple_values_test() ->
+    RawHeaderData = <<15:32/big-unsigned-integer,                             % Length of Name (Header 1)
+                      <<"x-forwarded-for">>/binary,                           % Name
+                      26:32/big-unsigned-integer,                             % Length of Value
+                      <<"1.2.3.4", 0, "5.6.7.8", 0, "9.10.11.12">>/binary >>, % Value
+    Result = espdy_parser:parse_name_val_pairs(3, 1, RawHeaderData, []),
+    ?assertEqual([{<<"x-forwarded-for">>,[<<"1.2.3.4">>, <<"5.6.7.8">>, <<"9.10.11.12">>]}], Result).
+
+parse_name_val_pairs_v3_invalid_header_name_test() ->
+    RawHeaderData = <<6:32/big-unsigned-integer, % Length of Name (Header 1)
+                      <<"Method">>/binary,       % Name (with a disallowed capital letter)
+                      3:32/big-unsigned-integer, % Length of Value
+                      <<"GET">>/binary >>,       % Value
+    Result = espdy_parser:parse_name_val_pairs(3, 1, RawHeaderData, []),
+    % Not clear on whether this is the correct type of error for this scenario
+    ?assertEqual({error, stream_protocol_error}, Result).
+
+parse_name_val_pairs_v3_zero_length_name_test() ->
+    RawHeaderData = <<0:32/big-unsigned-integer, % Length of Name (Header 1)
+                      <<"">>/binary,             % Name
+                      3:32/big-unsigned-integer, % Length of Value
+                      <<"GET">>/binary >>,       % Value
+    Result = espdy_parser:parse_name_val_pairs(3, 1, RawHeaderData, []),
+    ?assertEqual({error, stream_protocol_error}, Result).
+
+parse_name_val_pairs_v3_zero_length_value_test() ->
+    RawHeaderData = <<6:32/big-unsigned-integer, % Length of Name (Header 1)
+                      <<"method">>/binary,       % Name
+                      0:32/big-unsigned-integer, % Length of Value
+                      <<"">>/binary >>,          % Empty Value
+    Result = espdy_parser:parse_name_val_pairs(3, 1, RawHeaderData, []),
+    ?assertEqual({error, stream_protocol_error}, Result).
+
+parse_name_val_pairs_v3_consecutive_nuls_test() ->
+    RawHeaderData = <<6:32/big-unsigned-integer,     % Length of Name (Header 1)
+                      <<"method">>/binary,           % Name
+                      8:32/big-unsigned-integer,     % Length of Value
+                      <<"omg",0,0,"wtf">>/binary >>, % Invalid Value (consecutive NULs)
+    Result = espdy_parser:parse_name_val_pairs(3, 1, RawHeaderData, []),
     ?assertEqual({error, stream_protocol_error}, Result).
 
 %% =========================================================
