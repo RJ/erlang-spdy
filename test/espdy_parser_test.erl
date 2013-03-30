@@ -202,6 +202,29 @@ parse_control_frame_syn_stream_v2_raw_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, Zinf),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
+parse_control_frame_syn_stream_v2_header_error_test() ->
+    DesiredHeaders = [{<<"accept">>,
+                       <<"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8">>},
+                      {<<"accept">>,<<"*">>}, % Duplicate header name
+                      {<<"method">>,<<"GET">>},
+                      {<<"url">>,<<"/">>},
+                      {<<"version">>,<<"HTTP/1.1">>}],
+    Data = <<1:1, 9:31/big-unsigned-integer,              % Stream-ID
+             1:1, 5:31/big-unsigned-integer,              % Associated-To-Stream-ID
+             0:2/big-unsigned-integer,                    % Priority
+             0:14/big-unsigned-integer,                   % Unused
+             (pack_headers(2, DesiredHeaders))/binary >>, % Name/value header block
+    ControlFrameData = <<1:1,                                  % C
+                         2:15/big-unsigned-integer,            % Version
+                         1:16/big-unsigned-integer,            % Type
+                         2:8/big-unsigned-integer,             % Flags
+                         (size(Data)):24/big-unsigned-integer, % Length size(Data)
+                         Data/binary >>,                       % Data
+    Zinf = new_zlib_context_inflate(),
+    {Error, _Z} = espdy_parser:parse_frame(ControlFrameData, Zinf),
+    DesiredResponse = {error, stream_protocol_error, [{streamid, 9}, {frametype, ?SYN_STREAM}]},
+    ?assertEqual(DesiredResponse, Error).
+
 build_control_frame_syn_stream_v2_test() ->
     Headers = [{<<"method">>,<<"GET">>},
                {<<"url">>,<<"/">>},
@@ -286,6 +309,29 @@ parse_control_frame_syn_stream_v3_test() ->
     ok = zlib:inflateInit(Zinf),
     {ControlFrame, _Z} = espdy_parser:parse_frame(RawControlFrame, Zinf),
     ?assertEqual(DesiredControlFrame, ControlFrame).
+
+parse_control_frame_syn_stream_v3_header_error_test() ->
+    DesiredHeaders = [{<<":method">>,<<"GET">>},
+                      {<<":path">>,<<"/">>},
+                      {<<":version">>,<<"HTTP/1.1">>},
+                      {<<"accept">>,
+                       <<"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8">>},
+                      {<<"accept">>,<<"*">>}], % Duplicate header name
+    Data = <<1:1, 7:31/big-unsigned-integer,              % Stream-ID
+             1:1, 5:31/big-unsigned-integer,              % Associated-To-Stream-ID
+             0:2/big-unsigned-integer,                    % Priority
+             0:14/big-unsigned-integer,                   % Unused
+             (pack_headers(3, DesiredHeaders))/binary >>, % Name/value header block
+    ControlFrameData = <<1:1,                                  % C
+                         3:15/big-unsigned-integer,            % Version
+                         1:16/big-unsigned-integer,            % Type
+                         1:8/big-unsigned-integer,             % Flags
+                         (size(Data)):24/big-unsigned-integer, % Length size(Data)
+                         Data/binary >>,                       % Data
+    Zinf = new_zlib_context_inflate(),
+    {Error, _Z} = espdy_parser:parse_frame(ControlFrameData, Zinf),
+    DesiredResponse = {error, stream_protocol_error, [{streamid, 7}, {frametype, ?SYN_STREAM}]},
+    ?assertEqual(DesiredResponse, Error).
 
 build_control_frame_syn_stream_v3_test() ->
     Headers = [{<<":method">>,<<"GET">>},
@@ -479,6 +525,23 @@ parse_control_frame_headers_v2_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, new_zlib_context_inflate()),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
+parse_control_frame_headers_v2_header_error_test() ->
+    Headers = [{<<"Method">>,<<"GET">>}, % Invalid header name (capitalized)
+               {<<"url">>,<<"/">>},
+               {<<"version">>,<<"HTTP/1.1">>}],
+    Packed = pack_headers(2, Headers),
+    ControlFrameData = <<1:1,                                      % C
+                         2:15/big-unsigned-integer,                % Version
+                         8:16/big-unsigned-integer,                % Type
+                         1:8/big-unsigned-integer,                 % Flags
+                         (size(Packed)+6):24/big-unsigned-integer, % Length
+                         0:1, 432:31/big-unsigned-integer,         % Stream-ID
+                         0:16/big-unsigned-integer,                % Unused
+                         Packed/binary >>,                         % Name/value header block
+    {Error, _Z} = espdy_parser:parse_frame(ControlFrameData, new_zlib_context_inflate()),
+    DesiredResponse = {error, stream_protocol_error, [{streamid, 432}, {frametype, ?HEADERS}]},
+    ?assertEqual(DesiredResponse, Error).
+
 build_control_frame_headers_v2_test() ->
     Headers = [{<<"method">>,<<"GET">>},
                {<<"url">>,<<"/">>},
@@ -569,6 +632,24 @@ parse_control_frame_syn_reply_v2_test() ->
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, new_zlib_context_inflate()),
     ?assertEqual(DesiredControlFrame, ControlFrame).
 
+parse_control_frame_syn_reply_v2_header_error_test() ->
+    Headers = [{<<"status">>,<<"GET">>},
+               {<<"version">>,<<"HTTP/1.1">>},
+               {<<"content-type">>,<<"text/html">>},
+               {<<"content-type">>,<<"text/javascript">>}], % duplicate header
+    Packed = pack_headers(2, Headers),
+    ControlFrameData = <<1:1,                                      % C
+                         2:15/big-unsigned-integer,                % Version
+                         2:16/big-unsigned-integer,                % Type
+                         1:8/big-unsigned-integer,                 % Flags
+                         (size(Packed)+6):24/big-unsigned-integer, % Length
+                         0:1, 432:31/big-unsigned-integer,         % Stream-ID
+                         0:16/big-unsigned-integer,                % Unused
+                         Packed/binary >>,                         % Name/value header block
+    {Error, _Z} = espdy_parser:parse_frame(ControlFrameData, new_zlib_context_inflate()),
+    DesiredResponse = {error, stream_protocol_error, [{streamid, 432}, {frametype, ?SYN_REPLY}]},
+    ?assertEqual(DesiredResponse, Error).
+
 build_control_frame_syn_reply_v2_test() ->
     Headers = [{<<"status">>,<<"GET">>},
                {<<"version">>,<<"HTTP/1.1">>},
@@ -616,6 +697,23 @@ parse_control_frame_syn_reply_v3_test() ->
                                           headers=Headers},
     {ControlFrame, _Z} = espdy_parser:parse_frame(ControlFrameData, new_zlib_context_inflate()),
     ?assertEqual(DesiredControlFrame, ControlFrame).
+
+parse_control_frame_syn_reply_v3_header_error_test() ->
+    Headers = [{<<":status">>,<<"GET">>},
+               {<<":version">>,<<"HTTP/1.1">>},
+               {<<"content-type">>,<<"text/html">>},
+               {<<"content-type">>,<<"text/javascript">>}], % duplicate header
+    Packed = pack_headers(3, Headers),
+    ControlFrameData = <<1:1,                                      % C
+                         3:15/big-unsigned-integer,                % Version
+                         2:16/big-unsigned-integer,                % Type
+                         1:8/big-unsigned-integer,                 % Flags
+                         (size(Packed)+2):24/big-unsigned-integer, % Length
+                         0:1, 438:31/big-unsigned-integer,         % Stream-ID
+                         Packed/binary >>,                         % Name/value header block
+    {Error, _Z} = espdy_parser:parse_frame(ControlFrameData, new_zlib_context_inflate()),
+    DesiredResponse = {error, stream_protocol_error, [{streamid, 438}, {frametype, ?SYN_REPLY}]},
+    ?assertEqual(DesiredResponse, Error).
 
 build_control_frame_syn_reply_v3_test() ->
     Headers = [{<<":status">>,<<"GET">>},

@@ -54,13 +54,17 @@ parse_control_frame(V=2, ?SYN_STREAM, Flags, _Length,
                        Priority:2/big-unsigned-integer,
                        _Unused:14/binary-unit:1,
                        NVPairsData/binary >>, Z) ->
-    Headers = parse_name_val_header(V, NVPairsData, Z),
-    #spdy_syn_stream{version=V,
-                     flags=Flags,
-                     streamid=StreamID,
-                     associd=AssocStreamID,
-                     priority=Priority,
-                     headers=Headers};
+    case parse_name_val_header(V, NVPairsData, Z) of
+        {error, Reason} ->
+            {error, Reason, [{streamid, StreamID}, {frametype, ?SYN_STREAM}]};
+        Headers ->
+            #spdy_syn_stream{version=V,
+                             flags=Flags,
+                             streamid=StreamID,
+                             associd=AssocStreamID,
+                             priority=Priority,
+                             headers=Headers}
+    end;
 
 parse_control_frame(V=3, ?SYN_STREAM, Flags, _Length,
                     << _:1, StreamID:31/big-unsigned-integer,
@@ -69,33 +73,45 @@ parse_control_frame(V=3, ?SYN_STREAM, Flags, _Length,
                        _Unused:5/binary-unit:1,
                        Slot:8/big-unsigned-integer,
                        NVPairsData/binary >>, Z) ->
-    Headers = parse_name_val_header(V, NVPairsData, Z),
-    #spdy_syn_stream{version=V,
-                     flags=Flags,
-                     streamid=StreamID,
-                     associd=AssocStreamID,
-                     priority=Priority,
-                     slot=Slot,
-                     headers=Headers};
+    case parse_name_val_header(V, NVPairsData, Z) of
+        {error, Reason} ->
+            {error, Reason, [{streamid, StreamID}, {frametype, ?SYN_STREAM}]};
+        Headers ->
+            #spdy_syn_stream{version=V,
+                             flags=Flags,
+                             streamid=StreamID,
+                             associd=AssocStreamID,
+                             priority=Priority,
+                             slot=Slot,
+                             headers=Headers}
+    end;
 
 parse_control_frame(V=2, ?SYN_REPLY, Flags, _Length,
                     << _:1, StreamID:31/big-unsigned-integer,
                        _Unused:16/binary-unit:1,
                        NVPairsData/binary >>, Z) ->
-    Headers = parse_name_val_header(V, NVPairsData, Z),
-    #spdy_syn_reply{version=V,
-                    flags=Flags,
-                    streamid=StreamID,
-                    headers=Headers};
+    case parse_name_val_header(V, NVPairsData, Z) of
+        {error, Reason} ->
+            {error, Reason, [{streamid, StreamID}, {frametype, ?SYN_REPLY}]};
+        Headers ->
+            #spdy_syn_reply{version=V,
+                            flags=Flags,
+                            streamid=StreamID,
+                            headers=Headers}
+    end;
 
 parse_control_frame(V=3, ?SYN_REPLY, Flags, _Length,
                     << _:1, StreamID:31/big-unsigned-integer,
                        NVPairsData/binary >>, Z) ->
-    Headers = parse_name_val_header(V, NVPairsData, Z),
-    #spdy_syn_reply{version=V,
-                    flags=Flags,
-                    streamid=StreamID,
-                    headers=Headers};
+    case parse_name_val_header(V, NVPairsData, Z) of
+        {error, Reason} ->
+            {error, Reason, [{streamid, StreamID}, {frametype, ?SYN_REPLY}]};
+        Headers ->
+            #spdy_syn_reply{version=V,
+                            flags=Flags,
+                            streamid=StreamID,
+                            headers=Headers}
+    end;
 
 parse_control_frame(V, ?RST_STREAM, Flags, _Length,
                     << _:1, StreamID:31/big-unsigned-integer,
@@ -154,11 +170,15 @@ parse_control_frame(_V, _Type, _Flags, _Len, _Data, _Z) ->
     undefined.
 
 parse_headers_frame(Version, Flags, StreamID, NVPairsData, Z) ->
-    Headers = parse_name_val_header(Version, NVPairsData, Z),
-    #spdy_headers{version=Version,
-                  flags=Flags,
-                  streamid=StreamID,
-                  headers=Headers}.
+    case parse_name_val_header(Version, NVPairsData, Z) of
+        {error, Reason} ->
+            {error, Reason, [{streamid, StreamID}, {frametype, ?HEADERS}]};
+        Headers ->
+            #spdy_headers{version=Version,
+                          flags=Flags,
+                          streamid=StreamID,
+                          headers=Headers}
+    end.
 
 %% Marshal frame back into binary for transmission
 
@@ -291,7 +311,6 @@ parse_name_val_header(Version = 3, Bin, Z) ->
     parse_name_val_pairs(Version, Num, Rest, []).
 
 parse_name_val_pairs(_V, 0, _, Acc) ->
-    %% TODO: Validate that header names are unique per header block, no duplicates
     lists:reverse(Acc);
 
 %% Don't allow 0-length header names
