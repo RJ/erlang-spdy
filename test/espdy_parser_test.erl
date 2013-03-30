@@ -700,6 +700,15 @@ parse_name_val_pairs_v2_multiple_values_test() ->
     Result = espdy_parser:parse_name_val_pairs(2, 1, RawHeaderData, []),
     ?assertEqual([{<<"x-forwarded-for">>,[<<"1.2.3.4">>, <<"5.6.7.8">>, <<"9.10.11.12">>]}], Result).
 
+parse_name_val_pairs_v2_invalid_header_name_test() ->
+    RawHeaderData = <<6:16/big-unsigned-integer, % Length of Name (Header 1)
+                      <<"Method">>/binary,       % Name (with a disallowed capital letter)
+                      3:16/big-unsigned-integer, % Length of Value
+                      <<"GET">>/binary >>,       % Value
+    Result = espdy_parser:parse_name_val_pairs(2, 1, RawHeaderData, []),
+    % Not clear on whether this is the correct type of error for this scenario
+    ?assertEqual({error, stream_protocol_error}, Result).
+
 parse_name_val_pairs_v2_zero_length_name_test() ->
     RawHeaderData = <<0:16/big-unsigned-integer, % Length of Name (Header 1)
                       <<"">>/binary,             % Name

@@ -310,19 +310,25 @@ parse_name_val_pairs(Version = 2, Num, << NameLen:16/big-unsigned-integer,
                      ValLen:16/big-unsigned-integer,
                      Val:ValLen/binary,
                      Rest/binary >>, Acc) ->
-    case binary:match(Val, <<0>>) of
-        nomatch ->
-            Pair = {Name, Val},
-            parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
-        _ ->
-            case binary:match(Val, <<0,0>>) of
+    case validate_header_name(Version, Name) of
+        % Unsure about this, spec is not clear
+        invalid -> {error, stream_protocol_error};
+        ok ->
+            case binary:match(Val, <<0>>) of
                 nomatch ->
-                    % Split multiple header values on nul
-                    Pair = {Name, binary:split(Val, <<0>>, [global])},
+                    Pair = {Name, Val},
                     parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
                 _ ->
-                    %% Don't allow consecutive nuls
-                    {error, stream_protocol_error}
+                    %% No consecutive NULs in value
+                    case binary:match(Val, <<0,0>>) of
+                        nomatch ->
+                            %% Split multiple header values on NUL
+                            Pair = {Name, binary:split(Val, <<0>>, [global])},
+                            parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
+                        _ ->
+                            %% Don't allow consecutive nuls
+                            {error, stream_protocol_error}
+                    end
             end
     end;
 
@@ -344,6 +350,24 @@ parse_name_val_pairs(Version = 3, Num, << NameLen:32/big-unsigned-integer,
     %% PROTOCOL_ERROR with the stream-id.
     Pair = {Name, Val},
     parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]).
+
+validate_header_name(_Version = 2, <<>>) -> invalid;
+validate_header_name(Version = 2, <<C:8>>) ->
+    validate_header_char(Version, C);
+validate_header_name(Version = 2, <<C:8, Rest/binary>>) ->
+    case validate_header_char(Version, C) of
+        invalid -> invalid;
+        ok -> validate_header_name(Version, Rest)
+    end.
+
+validate_header_char(2, 0) ->
+    invalid; %% NUL is not allowed
+validate_header_char(2, C) when is_integer(C), C > 64, C < 91 ->
+    invalid; %% uppercase chars not allowed
+validate_header_char(2, C) when is_integer(C), C > 127 ->
+    invalid; %% Invalid ASCII range
+validate_header_char(2, C) when is_integer(C) ->
+    ok.
 
 %% END nvpair stuff
 
