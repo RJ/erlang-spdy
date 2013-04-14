@@ -877,12 +877,13 @@ parse_name_val_pairs_v3_zero_length_name_test() ->
     ?assertEqual({error, stream_protocol_error}, Result).
 
 parse_name_val_pairs_v3_zero_length_value_test() ->
+    %% 0-length header values are allowed in spdy/3
     RawHeaderData = <<6:32/big-unsigned-integer, % Length of Name (Header 1)
                       <<"method">>/binary,       % Name
                       0:32/big-unsigned-integer, % Length of Value
                       <<"">>/binary >>,          % Empty Value
     Result = espdy_parser:parse_name_val_pairs(3, 1, RawHeaderData, []),
-    ?assertEqual({error, stream_protocol_error}, Result).
+    ?assertEqual([{<<"method">>,<<>>}], Result).
 
 parse_name_val_pairs_v3_consecutive_nuls_test() ->
     RawHeaderData = <<6:32/big-unsigned-integer,     % Length of Name (Header 1)
