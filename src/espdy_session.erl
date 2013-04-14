@@ -131,6 +131,12 @@ process_buffer(State = #state{buffer = Buffer, z_context_inf = Z}) ->
         {undefined, Rest} ->
             ?LOG("Dropped unhandled control frame",[]),
             process_buffer(State#state{buffer=Rest});
+        {error, stream_protocol_error, PropList} ->
+            StreamID = proplists:get_value(streamid, PropList),
+            FrameType = proplists:get_value(frametype, PropList),
+            ?LOG("stream_protocol_error for stream ~p, frame type ~p",
+                 [StreamID, espdy_parser:type_to_atom(FrameType)]),
+            stream_error(protocol_error, #stream{id=StreamID}, State);
         %% frame received
         {F, Rest} when is_tuple(F) -> %% will be a #spdy_ record
             ?LOG("GOT FRAME: ~w",[F]),
