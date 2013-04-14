@@ -363,12 +363,6 @@ parse_name_val_pairs(Version = 2, Num, << NameLen:16/big-unsigned-integer,
 parse_name_val_pairs(_Version = 3, _Num, << 0:32/big-unsigned-integer,
                      _Rest/binary >>, _Acc) ->
     {error, stream_protocol_error};
-%% Don't allow 0-length header values
-parse_name_val_pairs(_Version = 3, _Num, << NameLen:32/big-unsigned-integer,
-                     _Name:NameLen/binary,
-                     0:32/big-unsigned-integer,
-                     _Rest/binary >>, _Acc) ->
-    {error, stream_protocol_error};
 parse_name_val_pairs(Version = 3, Num, << NameLen:32/big-unsigned-integer,
                      Name:NameLen/binary,
                      ValLen:32/big-unsigned-integer,
