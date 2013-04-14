@@ -7,7 +7,6 @@ start(Port) when is_integer(Port) ->
     ok = ssl:start(),
     spawn_link(fun() ->
         {ok, Listen} = ssl:listen(Port, [
-            %% Requires patched SSL:
             {next_protocols_advertised, [<<"spdy/3">>, <<"spdy/2">>, <<"http/1.0">>, <<"http/1.1">>]},
             {keyfile, "server.key"},
             {certfile, "server.crt"},
@@ -28,16 +27,21 @@ accept_loop(ListenSock) ->
         {ok, Sock} ->
             case ssl:ssl_accept(Sock) of
                 ok ->
-                    {ok, Proto} = ssl:negotiated_next_protocol(Sock),
-                    io:format("Negotiated next protocol: ~p\n",[Proto]),
-                    SpdyVersion = spdy_version_from_proto(Proto),
-                    Opts = [{spdy_version, SpdyVersion}], %% passed through to the stream callback module
-                    {ok, Pid} = espdy_session:start_link(Sock, ssl, espdy_stream_http, Opts),
-                    %% You must assign controlling process then send shoot, to notify
-                    %% espdy_session that it now owns the socket.
-                    ok = ssl:controlling_process(Sock, Pid),
-                    Pid ! shoot,
-                    accept_loop(ListenSock);
+                    case ssl:negotiated_next_protocol(Sock) of
+                        {ok, Proto} ->
+                            io:format("Negotiated next protocol: ~p\n",[Proto]),
+                            SpdyVersion = spdy_version_from_proto(Proto),
+                            Opts = [{spdy_version, SpdyVersion}], %% passed through to the stream callback module
+                            {ok, Pid} = espdy_session:start_link(Sock, ssl, espdy_stream_http, Opts),
+                            %% You must assign controlling process then send shoot, to notify
+                            %% espdy_session that it now owns the socket.
+                            ok = ssl:controlling_process(Sock, Pid),
+                            Pid ! shoot,
+                            accept_loop(ListenSock);
+                        {error,next_protocol_not_negotiated} ->
+                            io:format("failed next protocol negotiation~n"),
+                            ok = ssl:close(Sock)
+                    end;
                 X ->
                     %% Chrome seems to make non-ssl connections occasionally or something
                     io:format("ssl_accept: ~p\n",[X]),

@@ -54,13 +54,17 @@ parse_control_frame(V=2, ?SYN_STREAM, Flags, _Length,
                        Priority:2/big-unsigned-integer,
                        _Unused:14/binary-unit:1,
                        NVPairsData/binary >>, Z) ->
-    Headers = parse_name_val_header(V, NVPairsData, Z),
-    #spdy_syn_stream{version=V,
-                     flags=Flags,
-                     streamid=StreamID,
-                     associd=AssocStreamID,
-                     priority=Priority,
-                     headers=Headers};
+    case parse_name_val_header(V, NVPairsData, Z) of
+        {error, Reason} ->
+            {error, Reason, [{streamid, StreamID}, {frametype, ?SYN_STREAM}]};
+        Headers ->
+            #spdy_syn_stream{version=V,
+                             flags=Flags,
+                             streamid=StreamID,
+                             associd=AssocStreamID,
+                             priority=Priority,
+                             headers=Headers}
+    end;
 
 parse_control_frame(V=3, ?SYN_STREAM, Flags, _Length,
                     << _:1, StreamID:31/big-unsigned-integer,
@@ -69,33 +73,45 @@ parse_control_frame(V=3, ?SYN_STREAM, Flags, _Length,
                        _Unused:5/binary-unit:1,
                        Slot:8/big-unsigned-integer,
                        NVPairsData/binary >>, Z) ->
-    Headers = parse_name_val_header(V, NVPairsData, Z),
-    #spdy_syn_stream{version=V,
-                     flags=Flags,
-                     streamid=StreamID,
-                     associd=AssocStreamID,
-                     priority=Priority,
-                     slot=Slot,
-                     headers=Headers};
+    case parse_name_val_header(V, NVPairsData, Z) of
+        {error, Reason} ->
+            {error, Reason, [{streamid, StreamID}, {frametype, ?SYN_STREAM}]};
+        Headers ->
+            #spdy_syn_stream{version=V,
+                             flags=Flags,
+                             streamid=StreamID,
+                             associd=AssocStreamID,
+                             priority=Priority,
+                             slot=Slot,
+                             headers=Headers}
+    end;
 
 parse_control_frame(V=2, ?SYN_REPLY, Flags, _Length,
                     << _:1, StreamID:31/big-unsigned-integer,
                        _Unused:16/binary-unit:1,
                        NVPairsData/binary >>, Z) ->
-    Headers = parse_name_val_header(V, NVPairsData, Z),
-    #spdy_syn_reply{version=V,
-                    flags=Flags,
-                    streamid=StreamID,
-                    headers=Headers};
+    case parse_name_val_header(V, NVPairsData, Z) of
+        {error, Reason} ->
+            {error, Reason, [{streamid, StreamID}, {frametype, ?SYN_REPLY}]};
+        Headers ->
+            #spdy_syn_reply{version=V,
+                            flags=Flags,
+                            streamid=StreamID,
+                            headers=Headers}
+    end;
 
 parse_control_frame(V=3, ?SYN_REPLY, Flags, _Length,
                     << _:1, StreamID:31/big-unsigned-integer,
                        NVPairsData/binary >>, Z) ->
-    Headers = parse_name_val_header(V, NVPairsData, Z),
-    #spdy_syn_reply{version=V,
-                    flags=Flags,
-                    streamid=StreamID,
-                    headers=Headers};
+    case parse_name_val_header(V, NVPairsData, Z) of
+        {error, Reason} ->
+            {error, Reason, [{streamid, StreamID}, {frametype, ?SYN_REPLY}]};
+        Headers ->
+            #spdy_syn_reply{version=V,
+                            flags=Flags,
+                            streamid=StreamID,
+                            headers=Headers}
+    end;
 
 parse_control_frame(V, ?RST_STREAM, Flags, _Length,
                     << _:1, StreamID:31/big-unsigned-integer,
@@ -154,11 +170,15 @@ parse_control_frame(_V, _Type, _Flags, _Len, _Data, _Z) ->
     undefined.
 
 parse_headers_frame(Version, Flags, StreamID, NVPairsData, Z) ->
-    Headers = parse_name_val_header(Version, NVPairsData, Z),
-    #spdy_headers{version=Version,
-                  flags=Flags,
-                  streamid=StreamID,
-                  headers=Headers}.
+    case parse_name_val_header(Version, NVPairsData, Z) of
+        {error, Reason} ->
+            {error, Reason, [{streamid, StreamID}, {frametype, ?HEADERS}]};
+        Headers ->
+            #spdy_headers{version=Version,
+                          flags=Flags,
+                          streamid=StreamID,
+                          headers=Headers}
+    end.
 
 %% Marshal frame back into binary for transmission
 
@@ -292,22 +312,131 @@ parse_name_val_header(Version = 3, Bin, Z) ->
 
 parse_name_val_pairs(_V, 0, _, Acc) ->
     lists:reverse(Acc);
+
+%% Don't allow 0-length header names
+parse_name_val_pairs(_Version = 2, _Num, << 0:16/big-unsigned-integer,
+                     ValLen:16/big-unsigned-integer,
+                     _Val:ValLen/binary,
+                     _Rest/binary >>, _Acc) ->
+    {error, stream_protocol_error};
+%% Don't allow 0-length header values
+parse_name_val_pairs(_Version = 2, _Num, << NameLen:16/big-unsigned-integer,
+                     _Name:NameLen/binary,
+                     0:16/big-unsigned-integer,
+                     _Rest/binary >>, _Acc) ->
+    {error, stream_protocol_error};
 parse_name_val_pairs(Version = 2, Num, << NameLen:16/big-unsigned-integer,
                      Name:NameLen/binary,
                      ValLen:16/big-unsigned-integer,
                      Val:ValLen/binary,
                      Rest/binary >>, Acc) ->
-    %% TODO validate and throw errors as per 2.6.9
-    Pair = {Name, Val},
-    parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
+    case validate_header_name(Name) of
+        % Unsure about this, spec is not clear
+        invalid -> {error, stream_protocol_error};
+        ok ->
+            %% Check if we already received a header with that name
+            case lists:keyfind(Name, 1, Acc) of
+                false ->
+                    %% Check if this is a multi-value list (NUL-separated)
+                    case binary:match(Val, <<0>>) of
+                        nomatch ->
+                            Pair = {Name, Val},
+                            parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
+                        _ ->
+                            %% No consecutive NULs in value
+                            case binary:match(Val, <<0,0>>) of
+                                nomatch ->
+                                    %% Split multiple header values on NUL
+                                    Pair = {Name, binary:split(Val, <<0>>, [global])},
+                                    parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
+                                _ ->
+                                    %% Don't allow consecutive nuls
+                                    {error, stream_protocol_error}
+                            end
+                    end;
+                %% Duplicate header name, return error
+                _ -> {error, stream_protocol_error}
+            end
+    end;
+
+%% Don't allow 0-length header names
+parse_name_val_pairs(_Version = 3, _Num, << 0:32/big-unsigned-integer,
+                     _Rest/binary >>, _Acc) ->
+    {error, stream_protocol_error};
+%% Don't allow 0-length header values
+parse_name_val_pairs(_Version = 3, _Num, << NameLen:32/big-unsigned-integer,
+                     _Name:NameLen/binary,
+                     0:32/big-unsigned-integer,
+                     _Rest/binary >>, _Acc) ->
+    {error, stream_protocol_error};
 parse_name_val_pairs(Version = 3, Num, << NameLen:32/big-unsigned-integer,
                      Name:NameLen/binary,
                      ValLen:32/big-unsigned-integer,
                      Val:ValLen/binary,
                      Rest/binary >>, Acc) ->
-    %% TODO validate and throw errors as per 2.6.9
-    Pair = {Name, Val},
-    parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]).
+    %% As per 2.6.10, validate:
+    %% * Names must be lowercase ASCII
+    %% * Length of each name must be > 0
+    %% * Unique per header block, no duplicates
+    %% * Values must be either empty (length=0) or contain multiple,
+    %%   NUL-separated values, each with length > 0. No in-sequence NUL chars.
+    %% * Values cannot start or end with a NUL character
+    %%
+    %% If any of these validations fail, issue a stream error with status code
+    %% PROTOCOL_ERROR with the stream-id.
+    case validate_header_name(Name) of
+        % Unsure about this, spec is not clear
+        invalid -> {error, stream_protocol_error};
+        ok ->
+            %% Check if we already received a header with that name
+            case lists:keyfind(Name, 1, Acc) of
+                false ->
+                    case binary:match(Val, <<0>>) of
+                        nomatch ->
+                            Pair = {Name, Val},
+                            parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc]);
+                        _ ->
+                            Vals = binary:split(Val, <<0>>, [global]),
+                            case validate_header_values(Version, Vals) of
+                                invalid -> {error, stream_protocol_error};
+                                ok ->
+                                    Pair = {Name, Vals},
+                                    parse_name_val_pairs(Version, Num-1, Rest, [Pair | Acc])
+                            end
+                    end;
+                %% Duplicate header name, return error
+                _ -> {error, stream_protocol_error}
+            end
+    end.
+
+validate_header_name(<<>>) -> invalid;
+validate_header_name(<<C:8>>) ->
+    validate_header_char(C);
+validate_header_name(<<C:8, Rest/binary>>) ->
+    case validate_header_char(C) of
+        invalid -> invalid;
+        ok -> validate_header_name(Rest)
+    end.
+
+validate_header_char(0) ->
+    invalid; %% NUL is not allowed
+validate_header_char(C) when is_integer(C), C > 64, C < 91 ->
+    invalid; %% uppercase chars not allowed
+validate_header_char(C) when is_integer(C), C > 127 ->
+    invalid; %% Invalid ASCII range
+validate_header_char(C) when is_integer(C) ->
+    ok.
+
+validate_header_values(Version = 3, [Val | []] = Vals) when is_list(Vals) ->
+    validate_header_value(Version, Val);
+validate_header_values(Version = 3, [Val | T] = Vals) when is_list(Vals) ->
+    case validate_header_value(Version, Val) of
+        invalid -> invalid;
+        ok -> validate_header_values(Version, T)
+    end.
+
+validate_header_value(_Version = 3, <<>>) -> invalid;
+validate_header_value(_Version = 3, _) -> ok.
 
 %% END nvpair stuff
 
