@@ -222,9 +222,7 @@ handle_frame(#spdy_syn_stream{version=FrameVersion,
                               streamid=StreamID},
              State=#state{spdy_version=SessionVersion}) ->
     ?LOG("SYN_STREAM mismatched version, ~p -> ~p, sending stream_error", [FrameVersion, SessionVersion]),
-    % UNSUPPORTED_VERSION is reserved for stream recipients (i.e. the client),
-    % so send a generic PROTOCOL_ERROR.
-    stream_error(protocol_error, #stream{id=StreamID}, State),
+    stream_error(unsupported_version, #stream{id=StreamID}, State),
     State;
 
 handle_frame(#spdy_syn_reply{version=_Version,
@@ -253,8 +251,7 @@ handle_frame(#spdy_syn_reply{version=_Version,
 handle_frame(#spdy_syn_reply{version=FrameVersion,
                              streamid=StreamID},
              State=#state{spdy_version=SessionVersion}) ->
-    ?LOG("SYN_REPLY mismatched version, ~p -> ~p, sending stream_error", [FrameVersion, SessionVersion]),
-    stream_error(unsupported_version, #stream{id=StreamID}, State),
+    ?LOG("SYN_REPLY mismatched version, ~p -> ~p, ignoring frame", [FrameVersion, SessionVersion]),
     State;
 
 handle_frame(#spdy_rst_stream{version=_Version,
@@ -275,8 +272,7 @@ handle_frame(#spdy_rst_stream{version=_Version,
 
 handle_frame(#spdy_rst_stream{version=FrameVersion},
              State=#state{spdy_version=SessionVersion}) ->
-    ?LOG("RST_STREAM mismatched version, ~p -> ~p, sending session_error", [FrameVersion, SessionVersion]),
-    session_error(protocol_error, State),
+    ?LOG("RST_STREAM mismatched version, ~p -> ~p, ignoring frame", [FrameVersion, SessionVersion]),
     State;
 
 handle_frame(#spdy_settings{version=_Version,
@@ -288,8 +284,7 @@ handle_frame(#spdy_settings{version=_Version,
 
 handle_frame(#spdy_settings{version=FrameVersion},
              State=#state{spdy_version=SessionVersion}) ->
-    ?LOG("SETTINGS mismatched version, ~p -> ~p, sending session_error", [FrameVersion, SessionVersion]),
-    session_error(protocol_error, State),
+    ?LOG("SETTINGS mismatched version, ~p -> ~p, ignoring frame", [FrameVersion, SessionVersion]),
     State;
 
 
@@ -302,8 +297,7 @@ handle_frame(F=#spdy_ping{version=_Version}, State=#state{spdy_version=_Version}
 
 handle_frame(#spdy_ping{version=FrameVersion},
              State=#state{spdy_version=SessionVersion}) ->
-    ?LOG("PING mismatched version, ~p -> ~p, sending session_error", [FrameVersion, SessionVersion]),
-    session_error(protocol_error, State),
+    ?LOG("PING mismatched version, ~p -> ~p, ignoring frame", [FrameVersion, SessionVersion]),
     State;
 
 handle_frame(#spdy_goaway{version=_Version,
@@ -317,8 +311,7 @@ handle_frame(#spdy_goaway{version=_Version,
 
 handle_frame(#spdy_goaway{version=FrameVersion},
              State=#state{spdy_version=SessionVersion}) ->
-    ?LOG("GOAWAY mismatched version, ~p -> ~p, sending session_error", [FrameVersion, SessionVersion]),
-    session_error(protocol_error, State),
+    ?LOG("GOAWAY mismatched version, ~p -> ~p, ignoring frame", [FrameVersion, SessionVersion]),
     State;
 
 handle_frame(#spdy_headers{version=_Version,
@@ -342,8 +335,7 @@ handle_frame(#spdy_headers{version=_Version,
 handle_frame(#spdy_headers{version=FrameVersion,
                            streamid=StreamID},
              State=#state{spdy_version=SessionVersion}) ->
-    ?LOG("HEADERS mismatched version, ~p -> ~p, sending stream_error", [FrameVersion, SessionVersion]),
-    stream_error(unsupported_version, #stream{id=StreamID}, State),
+    ?LOG("HEADERS mismatched version, ~p -> ~p, ignoring frame", [FrameVersion, SessionVersion]),
     State;
 
 %% DATA FRAME:
