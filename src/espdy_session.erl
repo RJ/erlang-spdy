@@ -57,11 +57,6 @@ init([Socket, Transport, CBMod, Opts]) ->
     ok = zlib:inflateInit(Zinf),
     Zdef = zlib:open(),
     ok = zlib:deflateInit(Zdef),
-    %%ok = zlib:deflateInit(Z, best_compression,deflated, 15, 9, default),
-    case SpdyVersion of
-        2 -> zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT);
-        3 -> zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT_V3)
-    end,
     State = #state{ socket=Socket,
                     cbmod=CBMod,
                     transport=Transport,
@@ -70,8 +65,17 @@ init([Socket, Transport, CBMod, Opts]) ->
                     spdy_version = SpdyVersion,
                     spdy_opts=Opts
                   },
-    ?LOG("SPDY_VERSION init v~B ~p ~p",[SpdyVersion, self(), State]),
+    init_deflate(State),
+    ?LOG("SPDY_VERSION init v:~p ~p ~p",[SpdyVersion, self(), State]),
     {ok, State}.
+
+init_deflate(State) ->
+    Zdef = State#state.z_context_def,
+    case State#state.spdy_version of
+        2 -> zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT);
+        3 -> zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT_V3);
+        negotiate -> deferred
+    end.
 
 handle_call(none_implemented, _From, State) ->
     Reply = ok,
@@ -275,6 +279,12 @@ handle_frame(#spdy_rst_stream{version=FrameVersion},
     ?LOG("RST_STREAM mismatched version, ~p -> ~p, ignoring frame", [FrameVersion, SessionVersion]),
     State;
 
+handle_frame(Settings = #spdy_settings{version=Version}, State=#state{spdy_version=negotiate, spdy_opts=Opts}) ->
+    ?LOG("SETTINGS mismatched version, ~p, switching versions", [Version]),
+    NewOpts = [{spdy_version, Version} | proplists:delete(spdy_version, Opts)],
+    NewState = State#state{spdy_version=Version, spdy_opts=NewOpts},
+    init_deflate(NewState),
+    handle_frame(Settings, NewState);
 handle_frame(#spdy_settings{version=_Version,
                             flags=_Flags,
                             settings=Settings
