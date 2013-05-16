@@ -119,6 +119,11 @@ handle_cast(init_callback, State) ->
             StreamID = State#state.streamid,
             F = #spdy_rst_stream{ streamid=StreamID, statuscode=?PROTOCOL_ERROR },
             espdy_session:snd(State#state.pid, StreamID, F),
+            {stop, normal, State};
+        {error, ErrorStatusCode} when is_number(ErrorStatusCode) ->
+            StreamID = State#state.streamid,
+            F = #spdy_rst_stream{ streamid=StreamID, statuscode=ErrorStatusCode },
+            espdy_session:snd(State#state.pid, StreamID, F),
             {stop, normal, State}
     end;
 
