@@ -205,6 +205,7 @@ handle_frame(#spdy_syn_stream{  version=_Version,
                                                self(),
                                                Headers,
                                                State#state.cbmod,
+                                               lookup_setting(?SETTINGS_INITIAL_WINDOW_SIZE, State),
                                                State#state.spdy_opts),
             %% TODO pass fin into startlink?
             hasflag(Flags,?DATA_FLAG_FIN) andalso espdy_stream:received_fin(Pid),
@@ -297,7 +298,6 @@ handle_frame(#spdy_settings{version=FrameVersion},
     ?LOG("SETTINGS mismatched version, ~p -> ~p, ignoring frame", [FrameVersion, SessionVersion]),
     State;
 
-
 handle_frame(#spdy_noop{version=2}, State) ->
     State;
 
@@ -348,6 +348,20 @@ handle_frame(#spdy_headers{version=FrameVersion,
     ?LOG("HEADERS mismatched version, ~p -> ~p, ignoring frame", [FrameVersion, SessionVersion]),
     State;
 
+handle_frame(#spdy_window_update{ streamid=StreamID,
+                                  delta_size=DeltaSize}, State) ->
+    case lookup_stream(StreamID, State) of
+        undefined ->
+            F = #spdy_rst_stream{version=State#state.spdy_version,
+                                 streamid=StreamID,
+                                 statuscode=?INVALID_STREAM},
+            socket_write(F, State),
+            State;
+        S = #stream{} -> %% TODO check stream is known to be active still?
+            espdy_stream:window_updated(S#stream.pid, DeltaSize),
+            State
+    end;
+
 %% DATA FRAME:
 handle_frame(#spdy_data{ streamid=StreamID,
                          flags=Flags,
@@ -397,6 +411,13 @@ apply_settings(Settings, State = #state{settings=OldSettings}) ->
     end, OldSettings, Settings),
     ?LOG("SETTINGS FOR THIS SESSION: ~p",[NewSettings]),
     State#state{settings=NewSettings}.
+
+lookup_setting(Id, #state{settings=Settings}) ->
+  lookup_setting(Id, Settings);
+lookup_setting(_Id, []) -> undefined;
+lookup_setting(Id, [#spdy_setting_pair{id=Id, value=Value} | _]) -> Value;
+lookup_setting(Id, [_ | Settings]) -> lookup_setting(Id, Settings).
+
 %% STATUS CODES used by rst-stream, goaway, etc
 
 

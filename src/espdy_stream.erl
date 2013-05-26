@@ -12,8 +12,9 @@
 -compile(export_all).
 
 %% API
--export([start_link/5, send_data_fin/1, send_data/2, closed/2, received_data/2,
-         send_response/3, received_fin/1, send_frame/2, headers_updated/3
+-export([start_link/6, send_data_fin/1, send_data/2, closed/2, received_data/2,
+         send_response/3, received_fin/1, send_frame/2, headers_updated/3,
+         window_updated/2
         ]).
 
 %% gen_server callbacks
@@ -27,12 +28,13 @@
                 mod,
                 mod_state,
                 headers,
+                window_size,
                 spdy_version,
                 spdy_opts}).
 
 %% API
-start_link(StreamID, Pid, Headers, Mod, Opts) ->
-    gen_server:start(?MODULE, [StreamID, Pid, Headers, Mod, Opts], []).
+start_link(StreamID, Pid, Headers, Mod, WindowSize, Opts) ->
+    gen_server:start(?MODULE, [StreamID, Pid, Headers, Mod, WindowSize, Opts], []).
 
 send_data(Pid, Data) when is_pid(Pid), is_binary(Data) ->
     gen_server:cast(Pid, {data, Data}).
@@ -58,19 +60,19 @@ send_frame(Pid, F) ->
 headers_updated(Pid, Delta, NewMergedHeaders) ->
     gen_server:cast(Pid, {headers_updated, Delta, NewMergedHeaders}).
 
+window_updated(Pid, Delta) ->
+    gen_server:cast(Pid, {window_updated, Delta}).
+
 %% gen_server callbacks
 
-init([StreamID, Pid, Headers, Mod, Opts]) ->
+init([StreamID, Pid, Headers, Mod, WindowSize, Opts]) ->
     gen_server:cast(self(), init_callback),
-%%    Z = zlib:open(),
-%%    ok = zlib:deflateInit(Z),
-    %%ok = zlib:deflateInit(Z, best_compression,deflated, 15, 9, default),
-%%    zlib:deflateSetDictionary(Z, ?HEADERS_ZLIB_DICT),
     SpdyVersion = proplists:get_value(spdy_version, Opts),
     {ok, #state{streamid=StreamID,
                 pid=Pid,
                 mod=Mod,
                 headers=Headers,
+                window_size=WindowSize,
                 spdy_version=SpdyVersion,
                 spdy_opts=Opts}}.
 
@@ -143,7 +145,7 @@ handle_cast({send_frame, F}, State) ->
         _ -> setelement(2, F2, State#state.spdy_version)
     end,
     espdy_session:snd(State#state.pid, StreamId, FullF),
-    {noreply, State};
+    {noreply, decrement_window(F, State)};
 
 handle_cast(received_fin, State = #state{clientclosed=true}) ->
     ?LOG("Got FIN but client has already closed?", []),
@@ -166,6 +168,9 @@ handle_cast({headers_updated, Delta, NewMergedHeaders}, State) ->
     {ok, NewModState} = (State#state.mod):headers_updated(Delta, NewMergedHeaders, State#state.mod_state),
     {noreply, State#state{mod_state=NewModState}};
 
+handle_cast({window_updated, Delta}, State = #state{window_size=Size}) ->
+    {noreply, State#state{window_size=Size + Delta}};
+
 handle_cast({closed, Reason}, State) ->
     (State#state.mod):closed(Reason, State#state.mod_state),
     {stop, normal, State};
@@ -175,7 +180,7 @@ handle_cast({data, Bin}, State) when is_binary(Bin) ->
     F = #spdy_data{ streamid = State#state.streamid,
                     data=Bin},
     espdy_session:snd(State#state.pid, State#state.streamid, F),
-    {noreply, State};
+    {noreply, decrement_window(F, State)};
 
 %% last of streamed body
 handle_cast({data, fin}, State) ->
@@ -183,7 +188,7 @@ handle_cast({data, fin}, State) ->
                     flags=?DATA_FLAG_FIN,
                     data= <<"">>},
     espdy_session:snd(State#state.pid, State#state.streamid, F),
-    NewState = State#state{serverclosed=true},
+    NewState = decrement_window(F, State#state{serverclosed=true}),
     case both_closed(NewState) of
         true  -> ?LOG("Both ends closed, stopping stream ~w",[State#state.streamid]),
                  {stop, normal, NewState};
@@ -212,6 +217,11 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%% Internal functions
+
+decrement_window(#spdy_data{data=Data}, State = #state{window_size=Size}) ->
+  State#state{window_size=Size - size(Data)};
+decrement_window(_, State) ->
+  State.
 
 send_http_response(Headers, Body, State = #state{}) when is_list(Headers), is_binary(Body) ->
     io:format("Respond with: ~p ~p\n",[Headers, Body]),
