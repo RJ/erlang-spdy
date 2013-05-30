@@ -57,11 +57,6 @@ init([Socket, Transport, CBMod, Opts]) ->
     ok = zlib:inflateInit(Zinf),
     Zdef = zlib:open(),
     ok = zlib:deflateInit(Zdef),
-    %%ok = zlib:deflateInit(Z, best_compression,deflated, 15, 9, default),
-    case SpdyVersion of
-        2 -> zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT);
-        3 -> zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT_V3)
-    end,
     State = #state{ socket=Socket,
                     cbmod=CBMod,
                     transport=Transport,
@@ -70,8 +65,17 @@ init([Socket, Transport, CBMod, Opts]) ->
                     spdy_version = SpdyVersion,
                     spdy_opts=Opts
                   },
-    ?LOG("SPDY_VERSION init v~B ~p ~p",[SpdyVersion, self(), State]),
+    init_deflate(State),
+    ?LOG("SPDY_VERSION init v:~p ~p ~p",[SpdyVersion, self(), State]),
     {ok, State}.
+
+init_deflate(State) ->
+    Zdef = State#state.z_context_def,
+    case State#state.spdy_version of
+        2 -> zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT);
+        3 -> zlib:deflateSetDictionary(Zdef, ?HEADERS_ZLIB_DICT_V3);
+        negotiate -> deferred
+    end.
 
 handle_call(none_implemented, _From, State) ->
     Reply = ok,
@@ -201,6 +205,7 @@ handle_frame(#spdy_syn_stream{  version=_Version,
                                                self(),
                                                Headers,
                                                State#state.cbmod,
+                                               lookup_setting(?SETTINGS_INITIAL_WINDOW_SIZE, State),
                                                State#state.spdy_opts),
             %% TODO pass fin into startlink?
             hasflag(Flags,?DATA_FLAG_FIN) andalso espdy_stream:received_fin(Pid),
@@ -222,9 +227,7 @@ handle_frame(#spdy_syn_stream{version=FrameVersion,
                               streamid=StreamID},
              State=#state{spdy_version=SessionVersion}) ->
     ?LOG("SYN_STREAM mismatched version, ~p -> ~p, sending stream_error", [FrameVersion, SessionVersion]),
-    % UNSUPPORTED_VERSION is reserved for stream recipients (i.e. the client),
-    % so send a generic PROTOCOL_ERROR.
-    stream_error(protocol_error, #stream{id=StreamID}, State),
+    stream_error(unsupported_version, #stream{id=StreamID}, State),
     State;
 
 handle_frame(#spdy_syn_reply{version=_Version,
@@ -253,8 +256,7 @@ handle_frame(#spdy_syn_reply{version=_Version,
 handle_frame(#spdy_syn_reply{version=FrameVersion,
                              streamid=StreamID},
              State=#state{spdy_version=SessionVersion}) ->
-    ?LOG("SYN_REPLY mismatched version, ~p -> ~p, sending stream_error", [FrameVersion, SessionVersion]),
-    stream_error(unsupported_version, #stream{id=StreamID}, State),
+    ?LOG("SYN_REPLY mismatched version, ~p -> ~p, ignoring frame", [FrameVersion, SessionVersion]),
     State;
 
 handle_frame(#spdy_rst_stream{version=_Version,
@@ -275,10 +277,15 @@ handle_frame(#spdy_rst_stream{version=_Version,
 
 handle_frame(#spdy_rst_stream{version=FrameVersion},
              State=#state{spdy_version=SessionVersion}) ->
-    ?LOG("RST_STREAM mismatched version, ~p -> ~p, sending session_error", [FrameVersion, SessionVersion]),
-    session_error(protocol_error, State),
+    ?LOG("RST_STREAM mismatched version, ~p -> ~p, ignoring frame", [FrameVersion, SessionVersion]),
     State;
 
+handle_frame(Settings = #spdy_settings{version=Version}, State=#state{spdy_version=negotiate, spdy_opts=Opts}) ->
+    ?LOG("SETTINGS mismatched version, ~p, switching versions", [Version]),
+    NewOpts = [{spdy_version, Version} | proplists:delete(spdy_version, Opts)],
+    NewState = State#state{spdy_version=Version, spdy_opts=NewOpts},
+    init_deflate(NewState),
+    handle_frame(Settings, NewState);
 handle_frame(#spdy_settings{version=_Version,
                             flags=_Flags,
                             settings=Settings
@@ -288,10 +295,8 @@ handle_frame(#spdy_settings{version=_Version,
 
 handle_frame(#spdy_settings{version=FrameVersion},
              State=#state{spdy_version=SessionVersion}) ->
-    ?LOG("SETTINGS mismatched version, ~p -> ~p, sending session_error", [FrameVersion, SessionVersion]),
-    session_error(protocol_error, State),
+    ?LOG("SETTINGS mismatched version, ~p -> ~p, ignoring frame", [FrameVersion, SessionVersion]),
     State;
-
 
 handle_frame(#spdy_noop{version=2}, State) ->
     State;
@@ -302,8 +307,7 @@ handle_frame(F=#spdy_ping{version=_Version}, State=#state{spdy_version=_Version}
 
 handle_frame(#spdy_ping{version=FrameVersion},
              State=#state{spdy_version=SessionVersion}) ->
-    ?LOG("PING mismatched version, ~p -> ~p, sending session_error", [FrameVersion, SessionVersion]),
-    session_error(protocol_error, State),
+    ?LOG("PING mismatched version, ~p -> ~p, ignoring frame", [FrameVersion, SessionVersion]),
     State;
 
 handle_frame(#spdy_goaway{version=_Version,
@@ -317,8 +321,7 @@ handle_frame(#spdy_goaway{version=_Version,
 
 handle_frame(#spdy_goaway{version=FrameVersion},
              State=#state{spdy_version=SessionVersion}) ->
-    ?LOG("GOAWAY mismatched version, ~p -> ~p, sending session_error", [FrameVersion, SessionVersion]),
-    session_error(protocol_error, State),
+    ?LOG("GOAWAY mismatched version, ~p -> ~p, ignoring frame", [FrameVersion, SessionVersion]),
     State;
 
 handle_frame(#spdy_headers{version=_Version,
@@ -342,9 +345,22 @@ handle_frame(#spdy_headers{version=_Version,
 handle_frame(#spdy_headers{version=FrameVersion,
                            streamid=StreamID},
              State=#state{spdy_version=SessionVersion}) ->
-    ?LOG("HEADERS mismatched version, ~p -> ~p, sending stream_error", [FrameVersion, SessionVersion]),
-    stream_error(unsupported_version, #stream{id=StreamID}, State),
+    ?LOG("HEADERS mismatched version, ~p -> ~p, ignoring frame", [FrameVersion, SessionVersion]),
     State;
+
+handle_frame(#spdy_window_update{ streamid=StreamID,
+                                  delta_size=DeltaSize}, State) ->
+    case lookup_stream(StreamID, State) of
+        undefined ->
+            F = #spdy_rst_stream{version=State#state.spdy_version,
+                                 streamid=StreamID,
+                                 statuscode=?INVALID_STREAM},
+            socket_write(F, State),
+            State;
+        S = #stream{} -> %% TODO check stream is known to be active still?
+            espdy_stream:window_updated(S#stream.pid, DeltaSize),
+            State
+    end;
 
 %% DATA FRAME:
 handle_frame(#spdy_data{ streamid=StreamID,
@@ -395,6 +411,13 @@ apply_settings(Settings, State = #state{settings=OldSettings}) ->
     end, OldSettings, Settings),
     ?LOG("SETTINGS FOR THIS SESSION: ~p",[NewSettings]),
     State#state{settings=NewSettings}.
+
+lookup_setting(Id, #state{settings=Settings}) ->
+  lookup_setting(Id, Settings);
+lookup_setting(_Id, []) -> undefined;
+lookup_setting(Id, [#spdy_setting_pair{id=Id, value=Value} | _]) -> Value;
+lookup_setting(Id, [_ | Settings]) -> lookup_setting(Id, Settings).
+
 %% STATUS CODES used by rst-stream, goaway, etc
 
 

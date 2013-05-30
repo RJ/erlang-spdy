@@ -1,4 +1,4 @@
--define(LOG(S,A), io:format("~p\t" ++ S ++"\n",[self()|A])).
+-define(LOG(S,A), io:format(case whereis(spdy_logging) of undefined -> standard_io; LoggingPid -> LoggingPid end, "~p\t" ++ S ++"\n",[self()|A])).
 
 %% DATA FRAMES:
 -record(spdy_data, {
